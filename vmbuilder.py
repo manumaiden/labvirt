@@ -415,11 +415,6 @@ def ks_test_vm(ks_path, iso_path, os_name, version, vm_name, ram, vcpus, disk_gb
         print(f"  {'OS':<10}: {os_name} {version}")
         print(f"  {'SSH':<10}: {C.GREEN}ssh root@{mgmt_ip}{C.RST}")
         print(f"  {'Password':<10}: {cfg['ROOT_PASSWORD']}")
-        print(f"\n  {C.DIM}Verify with:")
-        print(f"    ip link show")
-        print(f"    nmcli connection show")
-        print(f"    cat /etc/udev/rules.d/80-net-setup-link.rules")
-        print(f"    cat /root/ks-post-udev.log{C.RST}")
     else:
         warn("VM started but IP not detected yet.")
         info(f"Check with: virsh net-dhcp-leases {cfg['MGMT_NET']}")

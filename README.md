@@ -51,6 +51,12 @@ vmbuilder build --os debian --version 12   --src ~/downloads/debian-12-amd64.qco
 vmbuilder create --os rocky --version 9.8 --name testlab-01
 vmbuilder create --os rhel  --version 8.10 --name rhel-test --ram 4096 --vcpus 4
 
+# Installazione fresh da ISO + kickstart (senza golden image)
+vmbuilder ks-test --os rocky --version 9.8 \
+  --iso ~/isos/Rocky-9.8-x86_64-dvd.iso \
+  --ks kickstarts/ks_rhel9.cfg \
+  --name ks-rocky9
+
 # Lista VM (con path disco)
 vmbuilder list
 
@@ -120,6 +126,19 @@ VMS_DIR="/percorso/vms"
 # Cartella scansionata per sorgenti qcow2 grezzi durante 'build'
 # Se impostata, mostra un menu di selezione invece del prompt manuale
 SOURCES_DIR="/percorso/sorgenti"
+
+# Cartella scansionata per ISO durante 'ks-test'
+# Se impostata, mostra un menu di selezione invece del prompt manuale
+KS_ISO_DIR="/percorso/iso"
+
+# Kickstart per 'ks-test':
+#   directory → menu TUI dei *.cfg contenuti
+#   file      → pre-riempie il prompt (e --ks in CLI)
+#   vuoto     → chiede path manualmente
+KS_PATH="/percorso/ks"
+
+# Dimensione disco di default (GB) per VM create con ks-test
+KS_DISK_SIZE=20
 ```
 
 ### Priorità config
@@ -153,6 +172,13 @@ vmbuilder/
 ├── install.sh          # Installa vmbuilder in ~/bin, crea ~/.vmbuilder.conf
 ├── configs/
 │   └── lab.conf        # Template di configurazione (non modificare)
+├── kickstarts/
+│   ├── ks_rhel8.cfg    # Kickstart RHEL 8 — minimal server
+│   ├── ks_rhel9.cfg    # Kickstart RHEL 9 — minimal server
+│   ├── ks_rhel10.cfg   # Kickstart RHEL 10 — minimal server
+│   ├── ks_rocky8.cfg   # Kickstart Rocky Linux 8 — minimal server
+│   ├── ks_rocky9.cfg   # Kickstart Rocky Linux 9 — minimal server
+│   └── ks_rocky10.cfg  # Kickstart Rocky Linux 10 — minimal server
 ├── original/           # Immagini golden provisioniate (default)
 └── vms/                # Dischi VM clonati (default, creati a runtime)
 ```
