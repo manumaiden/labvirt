@@ -520,6 +520,7 @@ def list_images(cfg):
     name_w = max(4, max(len(r[0]) for r in rows))
     size_w = max(4, max(len(r[1]) for r in rows))
 
+    print(f"  {C.DIM}{original_dir}{C.RST}")
     print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
     print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
     for name, size_str, mod in rows:
@@ -567,6 +568,7 @@ def list_isos(cfg):
     name_w = max(4, max(len(r[0]) for r in rows))
     size_w = max(4, max(len(r[1]) for r in rows))
 
+    print(f"  {C.DIM}{iso_dir}{C.RST}")
     print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
     print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
     for name, size_str, mod in rows:
