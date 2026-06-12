@@ -569,6 +569,60 @@ def list_isos(cfg):
         print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
     print()
 
+# ── Core: kickstarts ──────────────────────────────────────────────────────────
+
+def list_kickstarts(cfg):
+    ks_cfg = cfg.get("KS_PATH")
+    print()
+    if not ks_cfg:
+        info("KS_PATH not configured.")
+        print()
+        return
+
+    if ks_cfg.is_file():
+        files = [str(ks_cfg)]
+        ks_dir = ks_cfg.parent
+    elif ks_cfg.is_dir():
+        r = subprocess.run(
+            ["find", str(ks_cfg), "-maxdepth", "1", "-name", "*.cfg", "-type", "f"],
+            capture_output=True, text=True,
+        )
+        files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
+        ks_dir = ks_cfg
+    else:
+        info(f"KS_PATH not found: {ks_cfg}")
+        print()
+        return
+
+    if not files:
+        info("No kickstart files found.")
+        print()
+        return
+
+    rows = []
+    for f in files:
+        sr = subprocess.run(["stat", "-c", "%s %Y", f], capture_output=True, text=True)
+        try:
+            size_b, mtime = sr.stdout.strip().split()
+            size     = int(size_b)
+            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
+                       else f"{size / 1_048_576:.0f} MB" if size >= 1_048_576 \
+                       else f"{max(1, size // 1024)} KB"
+            mod      = datetime.datetime.fromtimestamp(int(mtime)).strftime("%Y-%m-%d %H:%M")
+        except (ValueError, OSError):
+            size_str, mod = "?", "?"
+        rows.append((Path(f).name, size_str, mod))
+
+    name_w = max(4, max(len(r[0]) for r in rows))
+    size_w = max(4, max(len(r[1]) for r in rows))
+
+    print(f"  {C.DIM}{ks_dir}{C.RST}")
+    print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
+    print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
+    for name, size_str, mod in rows:
+        print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
+    print()
+
 # ── Interactive flows ─────────────────────────────────────────────────────────
 
 def _list_sources(sources_dir):
@@ -775,6 +829,12 @@ def _interactive_list_isos(cfg):
     _pause()
 
 
+def _interactive_list_kickstarts(cfg):
+    sys.stdout.write("\033[2J\033[H")
+    list_kickstarts(cfg)
+    _pause()
+
+
 def interactive_main(cfg):
     actions = [
         ("Build image  (OS → golden qcow2)",    "build"),
@@ -784,6 +844,7 @@ def interactive_main(cfg):
         ("List VMs",                             "list"),
         ("List images",                          "images"),
         ("List ISOs",                            "isos"),
+        ("List kickstarts",                      "kickstarts"),
         ("Quit",                                 "quit"),
     ]
     while True:
@@ -808,6 +869,8 @@ def interactive_main(cfg):
             _interactive_list_images(cfg)
         elif action == "isos":
             _interactive_list_isos(cfg)
+        elif action == "kickstarts":
+            _interactive_list_kickstarts(cfg)
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -833,7 +896,8 @@ def cli_main(cfg):
 
     sub.add_parser("list",   help="List all VMs")
     sub.add_parser("images", help="List golden images in ORIGINAL_DIR")
-    sub.add_parser("isos",   help="List ISO files in KS_ISO_DIR")
+    sub.add_parser("isos",        help="List ISO files in KS_ISO_DIR")
+    sub.add_parser("kickstarts",  help="List kickstart files in KS_PATH")
 
     pk = sub.add_parser("ks-test", help="Install a VM from ISO + kickstart")
     pk.add_argument("--ks",      default=str(cfg["KS_PATH"]) if cfg.get("KS_PATH") else None,
@@ -871,6 +935,8 @@ def cli_main(cfg):
         list_images(cfg)
     elif args.cmd == "isos":
         list_isos(cfg)
+    elif args.cmd == "kickstarts":
+        list_kickstarts(cfg)
     else:
         ap.print_help()
 

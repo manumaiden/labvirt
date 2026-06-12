@@ -66,6 +66,9 @@ vmbuilder images
 # Lista ISO files in KS_ISO_DIR
 vmbuilder isos
 
+# Lista kickstart files in KS_PATH
+vmbuilder kickstarts
+
 # Distruggere una VM
 vmbuilder destroy testlab-01
 ```
