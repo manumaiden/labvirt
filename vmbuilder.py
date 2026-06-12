@@ -9,6 +9,7 @@ import subprocess
 import time
 import argparse
 import shlex
+import datetime
 from pathlib import Path
 from textwrap import dedent
 
@@ -31,11 +32,11 @@ OS_VARIANTS = {
     "rhel-8.10":  "rhel8-unknown",
     "rhel-9.7":   "rhel9-unknown",
     "rhel-9.8":   "rhel9-unknown",
-    "rhel-10.2":  "rhel9-unknown",
+    "rhel-10.2":  "generic",
     "rocky-7.9":  "rhel7.9",
     "rocky-8.10": "rhel8-unknown",
     "rocky-9.8":  "rhel9-unknown",
-    "rocky-10.2": "rhel9-unknown",
+    "rocky-10.2": "generic",
     "debian-12":  "debian12",
     "debian-13":  "debian13",
 }
@@ -266,6 +267,31 @@ def _get_mgmt_ip(vm_name, mgmt_net):
     return None
 
 
+def _wait_for_ip(vm_name, mgmt_net):
+    mgmt_ip = None
+    for i in range(1, 31):
+        time.sleep(2)
+        mgmt_ip = _get_mgmt_ip(vm_name, mgmt_net)
+        if mgmt_ip:
+            break
+        if i % 5 == 0:
+            info(f"Still waiting... ({i * 2}s)")
+    return mgmt_ip
+
+
+def _print_vm_ready(vm_name, os_name, version, mgmt_ip, cfg):
+    print()
+    if mgmt_ip:
+        ok("VM ready!")
+        print(f"\n  {'VM':<10}: {C.BOLD}{vm_name}{C.RST}")
+        print(f"  {'OS':<10}: {os_name} {version}")
+        print(f"  {'SSH':<10}: {C.GREEN}ssh root@{mgmt_ip}{C.RST}")
+        print(f"  {'Password':<10}: {cfg['ROOT_PASSWORD']}")
+    else:
+        warn("VM started but IP not detected yet.")
+        info(f"Check with: virsh net-dhcp-leases {cfg['MGMT_NET']}")
+
+
 def create_vm(os_name, version, vm_name, ram, vcpus, cfg):
     base_image = cfg["ORIGINAL_DIR"] / f"{os_name}-{version}-base.qcow2"
     vm_disk    = cfg["VMS_DIR"] / f"{vm_name}.qcow2"
@@ -308,23 +334,10 @@ def create_vm(os_name, version, vm_name, ram, vcpus, cfg):
     ], sudo=True)
 
     info("Waiting for DHCP lease on management network...")
-    mgmt_ip = None
-    for i in range(1, 31):
-        time.sleep(2)
-        mgmt_ip = _get_mgmt_ip(vm_name, cfg["MGMT_NET"])
-        if mgmt_ip:
-            break
-        if i % 5 == 0:
-            info(f"Still waiting... ({i * 2}s)")
+    mgmt_ip = _wait_for_ip(vm_name, cfg["MGMT_NET"])
+    _print_vm_ready(vm_name, os_name, version, mgmt_ip, cfg)
 
-    print()
     if mgmt_ip:
-        ok("VM ready!")
-        print(f"\n  {'VM':<10}: {C.BOLD}{vm_name}{C.RST}")
-        print(f"  {'OS':<10}: {os_name} {version}")
-        print(f"  {'SSH':<10}: {C.GREEN}ssh root@{mgmt_ip}{C.RST}")
-        print(f"  {'Password':<10}: {cfg['ROOT_PASSWORD']}")
-
         rhsm_user = os.environ.get("RHSM_USER", "")
         rhsm_pass = os.environ.get("RHSM_PASS", "")
         if os_name == "rhel" and rhsm_user and rhsm_pass:
@@ -345,9 +358,6 @@ def create_vm(os_name, version, vm_name, ram, vcpus, cfg):
             warn("Register subscription manually:")
             print(f"  {C.DIM}subscription-manager register --username USER --password PASS --auto-attach")
             print(f"  dnf install -y bash-completion vim{C.RST}")
-    else:
-        warn("VM started but IP not detected yet.")
-        info(f"Check with: virsh net-dhcp-leases {cfg['MGMT_NET']}")
 
 # ── Core: ks-test ─────────────────────────────────────────────────────────────
 
@@ -399,25 +409,8 @@ def ks_test_vm(ks_path, iso_path, os_name, version, vm_name, ram, vcpus, disk_gb
     ], sudo=True)
 
     info("Waiting for DHCP lease on management network...")
-    mgmt_ip = None
-    for i in range(1, 31):
-        time.sleep(2)
-        mgmt_ip = _get_mgmt_ip(vm_name, cfg["MGMT_NET"])
-        if mgmt_ip:
-            break
-        if i % 5 == 0:
-            info(f"Still waiting... ({i * 2}s)")
-
-    print()
-    if mgmt_ip:
-        ok("VM ready!")
-        print(f"\n  {'VM':<10}: {C.BOLD}{vm_name}{C.RST}")
-        print(f"  {'OS':<10}: {os_name} {version}")
-        print(f"  {'SSH':<10}: {C.GREEN}ssh root@{mgmt_ip}{C.RST}")
-        print(f"  {'Password':<10}: {cfg['ROOT_PASSWORD']}")
-    else:
-        warn("VM started but IP not detected yet.")
-        info(f"Check with: virsh net-dhcp-leases {cfg['MGMT_NET']}")
+    mgmt_ip = _wait_for_ip(vm_name, cfg["MGMT_NET"])
+    _print_vm_ready(vm_name, os_name, version, mgmt_ip, cfg)
 
 # ── Core: destroy ─────────────────────────────────────────────────────────────
 
@@ -442,7 +435,7 @@ def destroy_vm(vm_name, cfg):
 
 # ── Core: list ────────────────────────────────────────────────────────────────
 
-def list_vms():
+def list_vms(cfg):
     r = virsh("list", "--all", "--name")
     names = [n.strip() for n in r.stdout.splitlines() if n.strip()]
     print()
@@ -469,18 +462,21 @@ def list_vms():
                 disk = parts[1]
                 break
 
-        rows.append((vm_id, name, state, disk))
+        ip = _get_mgmt_ip(name, cfg["MGMT_NET"]) if state == "running" else "-"
+        rows.append((vm_id, name, state, ip or "-", disk))
 
     id_w    = max(2,  max(len(r[0]) for r in rows))
     name_w  = max(4,  max(len(r[1]) for r in rows))
     state_w = max(5,  max(len(r[2]) for r in rows))
-    disk_w  = max(4,  max(len(r[3]) for r in rows))
+    ip_w    = max(2,  max(len(r[3]) for r in rows))
+    disk_w  = max(4,  max(len(r[4]) for r in rows))
 
-    print(f"  {C.BOLD}{'ID':<{id_w}}  {'Name':<{name_w}}  {'State':<{state_w}}  {'Disk':<{disk_w}}{C.RST}")
-    print(f"  {'─'*id_w}  {'─'*name_w}  {'─'*state_w}  {'─'*disk_w}")
-    for vm_id, name, state, disk in rows:
+    print(f"  {C.BOLD}{'ID':<{id_w}}  {'Name':<{name_w}}  {'State':<{state_w}}  {'IP':<{ip_w}}  {'Disk':<{disk_w}}{C.RST}")
+    print(f"  {'─'*id_w}  {'─'*name_w}  {'─'*state_w}  {'─'*ip_w}  {'─'*disk_w}")
+    for vm_id, name, state, ip, disk in rows:
         col = C.GREEN if state == "running" else C.DIM
-        print(f"  {vm_id:<{id_w}}  {col}{name:<{name_w}}{C.RST}  {state:<{state_w}}  {C.DIM}{disk}{C.RST}")
+        ip_col = C.GREEN if ip != "-" else C.DIM
+        print(f"  {vm_id:<{id_w}}  {col}{name:<{name_w}}{C.RST}  {state:<{state_w}}  {ip_col}{ip:<{ip_w}}{C.RST}  {C.DIM}{disk}{C.RST}")
     print()
 
 # ── Core: images ──────────────────────────────────────────────────────────────
@@ -503,7 +499,6 @@ def list_images(cfg):
         print()
         return
 
-    import datetime
     rows = []
     for f in files:
         sr = subprocess.run(["sudo", "stat", "-c", "%s %Y", f], capture_output=True, text=True)
@@ -551,7 +546,6 @@ def list_isos(cfg):
         print()
         return
 
-    import datetime
     rows = []
     for f in files:
         sr = subprocess.run(["sudo", "stat", "-c", "%s %Y", f], capture_output=True, text=True)
@@ -682,12 +676,12 @@ def _interactive_create(cfg):
 
 
 def _interactive_ks_test(cfg):
-    os_ch = menu("Select OS", [(o, o) for o in SUPPORTED_OS], "KS test")
+    os_ch = menu("Select OS", [(o, o) for o in SUPPORTED_OS], "Install VM from ISO+ks")
     if not os_ch:
         return
     ver_ch = menu("Select version",
                   [(v, v) for v in SUPPORTED_OS[os_ch]],
-                  f"KS test — {os_ch}")
+                  f"Install VM from ISO+ks — {os_ch}")
     if not ver_ch:
         return
 
@@ -763,9 +757,9 @@ def _interactive_destroy(cfg):
     _pause()
 
 
-def _interactive_list():
+def _interactive_list(cfg):
     sys.stdout.write("\033[2J\033[H")
-    list_vms()
+    list_vms(cfg)
     _pause()
 
 
@@ -809,7 +803,7 @@ def interactive_main(cfg):
         elif action == "destroy":
             _interactive_destroy(cfg)
         elif action == "list":
-            _interactive_list()
+            _interactive_list(cfg)
         elif action == "images":
             _interactive_list_images(cfg)
         elif action == "isos":
@@ -854,6 +848,12 @@ def cli_main(cfg):
 
     args = ap.parse_args()
 
+    if args.cmd in ("build", "create", "ks-test"):
+        valid = SUPPORTED_OS.get(args.os, [])
+        if args.version not in valid:
+            ap.error(f"unsupported version '{args.version}' for --os {args.os}. "
+                     f"Supported: {', '.join(valid)}")
+
     if args.cmd == "build":
         build_image(args.os, args.version, args.src, cfg)
     elif args.cmd == "create":
@@ -866,7 +866,7 @@ def cli_main(cfg):
     elif args.cmd == "destroy":
         destroy_vm(args.name, cfg)
     elif args.cmd == "list":
-        list_vms()
+        list_vms(cfg)
     elif args.cmd == "images":
         list_images(cfg)
     elif args.cmd == "isos":

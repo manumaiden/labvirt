@@ -54,10 +54,10 @@ vmbuilder create --os rhel  --version 8.10 --name rhel-test --ram 4096 --vcpus 4
 # Installazione fresh da ISO + kickstart (senza golden image)
 vmbuilder ks-test --os rocky --version 9.8 \
   --iso ~/isos/Rocky-9.8-x86_64-dvd.iso \
-  --ks kickstarts/ks_rhel9.cfg \
+  --ks kickstarts/ks_rocky9.cfg \
   --name ks-rocky9
 
-# Lista VM (con path disco)
+# Lista VM (con IP management per VM running)
 vmbuilder list
 
 # Lista golden images in ORIGINAL_DIR
