@@ -63,6 +63,9 @@ vmbuilder list
 # Lista golden images in ORIGINAL_DIR
 vmbuilder images
 
+# Lista ISO files in KS_ISO_DIR
+vmbuilder isos
+
 # Distruggere una VM
 vmbuilder destroy testlab-01
 ```

@@ -526,6 +526,53 @@ def list_images(cfg):
         print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
     print()
 
+# ── Core: isos ────────────────────────────────────────────────────────────────
+
+def list_isos(cfg):
+    iso_dir = cfg.get("KS_ISO_DIR")
+    print()
+    if not iso_dir:
+        info("KS_ISO_DIR not configured.")
+        print()
+        return
+    if not _exists(iso_dir):
+        info(f"KS_ISO_DIR not found: {iso_dir}")
+        print()
+        return
+
+    r = subprocess.run(
+        ["sudo", "find", str(iso_dir), "-maxdepth", "1", "-name", "*.iso", "-type", "f"],
+        capture_output=True, text=True,
+    )
+    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
+    if not files:
+        info("No ISO files found.")
+        print()
+        return
+
+    import datetime
+    rows = []
+    for f in files:
+        sr = subprocess.run(["sudo", "stat", "-c", "%s %Y", f], capture_output=True, text=True)
+        try:
+            size_b, mtime = sr.stdout.strip().split()
+            size     = int(size_b)
+            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
+                       else f"{size / 1_048_576:.0f} MB"
+            mod      = datetime.datetime.fromtimestamp(int(mtime)).strftime("%Y-%m-%d %H:%M")
+        except (ValueError, OSError):
+            size_str, mod = "?", "?"
+        rows.append((Path(f).name, size_str, mod))
+
+    name_w = max(4, max(len(r[0]) for r in rows))
+    size_w = max(4, max(len(r[1]) for r in rows))
+
+    print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
+    print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
+    for name, size_str, mod in rows:
+        print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
+    print()
+
 # ── Interactive flows ─────────────────────────────────────────────────────────
 
 def _list_sources(sources_dir):
@@ -726,15 +773,22 @@ def _interactive_list_images(cfg):
     _pause()
 
 
+def _interactive_list_isos(cfg):
+    sys.stdout.write("\033[2J\033[H")
+    list_isos(cfg)
+    _pause()
+
+
 def interactive_main(cfg):
     actions = [
-        ("Build golden image", "build"),
-        ("Create VM",          "create"),
-        ("KS test",            "ks-test"),
-        ("Destroy VM",         "destroy"),
-        ("List VMs",           "list"),
-        ("List golden images", "images"),
-        ("Quit",               "quit"),
+        ("Build image  (OS → golden qcow2)",    "build"),
+        ("Create VM    (golden → linked clone)", "create"),
+        ("Install VM from ISO+ks",               "ks-test"),
+        ("Destroy VM",                           "destroy"),
+        ("List VMs",                             "list"),
+        ("List images",                          "images"),
+        ("List ISOs",                            "isos"),
+        ("Quit",                                 "quit"),
     ]
     while True:
         action = menu("Main menu", actions)
@@ -756,6 +810,8 @@ def interactive_main(cfg):
             _interactive_list()
         elif action == "images":
             _interactive_list_images(cfg)
+        elif action == "isos":
+            _interactive_list_isos(cfg)
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -781,6 +837,7 @@ def cli_main(cfg):
 
     sub.add_parser("list",   help="List all VMs")
     sub.add_parser("images", help="List golden images in ORIGINAL_DIR")
+    sub.add_parser("isos",   help="List ISO files in KS_ISO_DIR")
 
     pk = sub.add_parser("ks-test", help="Install a VM from ISO + kickstart")
     pk.add_argument("--ks",      default=str(cfg["KS_PATH"]) if cfg.get("KS_PATH") else None,
@@ -810,6 +867,8 @@ def cli_main(cfg):
         list_vms()
     elif args.cmd == "images":
         list_images(cfg)
+    elif args.cmd == "isos":
+        list_isos(cfg)
     else:
         ap.print_help()
 
