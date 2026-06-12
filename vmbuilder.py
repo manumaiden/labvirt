@@ -571,6 +571,15 @@ def _list_isos(iso_dir):
     return result
 
 
+def _list_ks_files(ks_dir):
+    r = subprocess.run(
+        ["find", str(ks_dir), "-maxdepth", "1", "-name", "*.cfg", "-type", "f"],
+        capture_output=True, text=True,
+    )
+    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
+    return [(Path(f).name, f) for f in files]
+
+
 def _interactive_build(cfg):
     os_ch = menu("Select OS", [(o, o) for o in SUPPORTED_OS], "Build golden image")
     if not os_ch:
@@ -650,6 +659,18 @@ def _interactive_ks_test(cfg):
             if picked != "__manual__":
                 iso_path = picked
 
+    ks_path = None
+    ks_cfg  = cfg.get("KS_PATH")
+    if ks_cfg and ks_cfg.is_dir():
+        choices = _list_ks_files(ks_cfg)
+        if choices:
+            choices.append(("[ Inserisci path manualmente ]", "__manual__"))
+            picked = menu("Select kickstart", choices, f"KS test — {os_ch} {ver_ch}")
+            if not picked:
+                return
+            if picked != "__manual__":
+                ks_path = picked
+
     sys.stdout.write("\033[2J\033[H")
     if iso_path is None:
         iso_path = _prompt("ISO path")
@@ -657,10 +678,12 @@ def _interactive_ks_test(cfg):
             warn("No ISO path provided.")
             return
 
-    ks_path = _prompt("Kickstart path", str(cfg["KS_PATH"]) if cfg.get("KS_PATH") else "")
-    if not ks_path:
-        warn("No kickstart path provided.")
-        return
+    if ks_path is None:
+        default = str(ks_cfg) if ks_cfg and ks_cfg.is_file() else ""
+        ks_path = _prompt("Kickstart path", default)
+        if not ks_path:
+            warn("No kickstart path provided.")
+            return
 
     vm_name = _prompt("VM name", f"ks-test-{os_ch}-{ver_ch}")
     ram     = int(_prompt("RAM (MB)", cfg.get("DEFAULT_RAM", "2048")))
