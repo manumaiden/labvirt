@@ -569,6 +569,53 @@ def list_isos(cfg):
         print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
     print()
 
+# ── Core: sources ────────────────────────────────────────────────────────────
+
+def list_sources(cfg):
+    sources_dir = cfg.get("SOURCES_DIR")
+    print()
+    if not sources_dir:
+        info("SOURCES_DIR not configured.")
+        print()
+        return
+    if not _exists(sources_dir):
+        info(f"SOURCES_DIR not found: {sources_dir}")
+        print()
+        return
+
+    r = subprocess.run(
+        ["sudo", "find", str(sources_dir), "-maxdepth", "1", "-name", "*.qcow2", "-type", "f"],
+        capture_output=True, text=True,
+    )
+    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
+    if not files:
+        info("No source images found.")
+        print()
+        return
+
+    rows = []
+    for f in files:
+        sr = subprocess.run(["sudo", "stat", "-c", "%s %Y", f], capture_output=True, text=True)
+        try:
+            size_b, mtime = sr.stdout.strip().split()
+            size     = int(size_b)
+            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
+                       else f"{size / 1_048_576:.0f} MB"
+            mod      = datetime.datetime.fromtimestamp(int(mtime)).strftime("%Y-%m-%d %H:%M")
+        except (ValueError, OSError):
+            size_str, mod = "?", "?"
+        rows.append((Path(f).name, size_str, mod))
+
+    name_w = max(4, max(len(r[0]) for r in rows))
+    size_w = max(4, max(len(r[1]) for r in rows))
+
+    print(f"  {C.DIM}{sources_dir}{C.RST}")
+    print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
+    print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
+    for name, size_str, mod in rows:
+        print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
+    print()
+
 # ── Core: kickstarts ──────────────────────────────────────────────────────────
 
 def list_kickstarts(cfg):
@@ -823,6 +870,12 @@ def _interactive_list_images(cfg):
     _pause()
 
 
+def _interactive_list_sources(cfg):
+    sys.stdout.write("\033[2J\033[H")
+    list_sources(cfg)
+    _pause()
+
+
 def _interactive_list_isos(cfg):
     sys.stdout.write("\033[2J\033[H")
     list_isos(cfg)
@@ -843,6 +896,7 @@ def interactive_main(cfg):
         ("Destroy VM",                           "destroy"),
         ("List VMs",                             "list"),
         ("List images",                          "images"),
+        ("List sources",                         "sources"),
         ("List ISOs",                            "isos"),
         ("List kickstarts",                      "kickstarts"),
         ("Quit",                                 "quit"),
@@ -867,6 +921,8 @@ def interactive_main(cfg):
             _interactive_list(cfg)
         elif action == "images":
             _interactive_list_images(cfg)
+        elif action == "sources":
+            _interactive_list_sources(cfg)
         elif action == "isos":
             _interactive_list_isos(cfg)
         elif action == "kickstarts":
@@ -896,6 +952,7 @@ def cli_main(cfg):
 
     sub.add_parser("list",   help="List all VMs")
     sub.add_parser("images", help="List golden images in ORIGINAL_DIR")
+    sub.add_parser("sources",     help="List raw qcow2 source images in SOURCES_DIR")
     sub.add_parser("isos",        help="List ISO files in KS_ISO_DIR")
     sub.add_parser("kickstarts",  help="List kickstart files in KS_PATH")
 
@@ -933,6 +990,8 @@ def cli_main(cfg):
         list_vms(cfg)
     elif args.cmd == "images":
         list_images(cfg)
+    elif args.cmd == "sources":
+        list_sources(cfg)
     elif args.cmd == "isos":
         list_isos(cfg)
     elif args.cmd == "kickstarts":

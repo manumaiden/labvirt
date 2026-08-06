@@ -63,6 +63,9 @@ vmbuilder list
 # List golden images in ORIGINAL_DIR
 vmbuilder images
 
+# List raw qcow2 source images in SOURCES_DIR
+vmbuilder sources
+
 # List ISO files in KS_ISO_DIR
 vmbuilder isos
 
