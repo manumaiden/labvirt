@@ -122,12 +122,15 @@ def _read_key():
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 
-def menu(title, options, hint=""):
+def menu(title, options, hint="", descriptions=None):
     """Arrow-key menu. options = [(label, value), ...] or [(label, value, kind), ...].
 
     value=None marks a non-selectable section header. kind="danger" renders
-    the label in red when not selected. Returns the selected value or None.
+    the label in red when not selected. descriptions is an optional
+    {value: text} map shown next to the currently selected item.
+    Returns the selected value or None.
     """
+    descriptions = descriptions or {}
     selectable = [i for i, item in enumerate(options) if item[1] is not None]
     selected = selectable[0]
     while True:
@@ -144,7 +147,9 @@ def menu(title, options, hint=""):
             if value is None:
                 print(f"\n  {C.DIM}{C.BOLD}{label}{C.RST}")
             elif i == selected:
-                print(f"  {C.BG_BLUE}{C.WHITE}{C.BOLD}  {label:<32}  {C.RST}")
+                desc = descriptions.get(value, "")
+                desc_part = f"   {C.DIM}{desc}{C.RST}" if desc else ""
+                print(f"  {C.BG_BLUE}{C.WHITE}{C.BOLD}  {label:<32}  {C.RST}{desc_part}")
             elif kind == "danger":
                 print(f"    {C.RED}{label}{C.RST}")
             else:
@@ -938,8 +943,19 @@ def interactive_main(cfg):
         ("List kickstarts",                      "kickstarts"),
         ("Quit",                                 "quit"),
     ]
+    descriptions = {
+        "build":      "vmbuilder build --os <os> --version <ver> --src <path>",
+        "create":     "vmbuilder create --os <os> --version <ver> --name <name>",
+        "ks-test":    "vmbuilder ks-test --os <os> --version <ver> --iso <iso> --ks <ks> --name <name>",
+        "destroy":    "vmbuilder destroy <name>",
+        "list":       "vmbuilder list",
+        "images":     "vmbuilder images",
+        "sources":    "vmbuilder sources",
+        "isos":       "vmbuilder isos",
+        "kickstarts": "vmbuilder kickstarts",
+    }
     while True:
-        action = menu("Main menu", actions, _main_menu_hint(cfg))
+        action = menu("Main menu", actions, _main_menu_hint(cfg), descriptions)
         if action in (None, "quit"):
             sys.stdout.write("\033[2J\033[H\n")
             break
