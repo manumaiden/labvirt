@@ -123,8 +123,13 @@ def _read_key():
 
 
 def menu(title, options, hint=""):
-    """Arrow-key menu. options = [(label, value), ...]. Returns value or None."""
-    selected = 0
+    """Arrow-key menu. options = [(label, value), ...] or [(label, value, kind), ...].
+
+    value=None marks a non-selectable section header. kind="danger" renders
+    the label in red when not selected. Returns the selected value or None.
+    """
+    selectable = [i for i, item in enumerate(options) if item[1] is not None]
+    selected = selectable[0]
     while True:
         sys.stdout.write("\033[2J\033[H")
         print(f"\n  {C.BOLD}{C.CYAN}vmbuilder{C.RST}  "
@@ -133,9 +138,15 @@ def menu(title, options, hint=""):
         if hint:
             print(f"  {C.YELLOW}{hint}{C.RST}\n")
         print(f"  {C.BOLD}{title}{C.RST}\n")
-        for i, (label, _) in enumerate(options):
-            if i == selected:
+        for i, item in enumerate(options):
+            label, value = item[0], item[1]
+            kind = item[2] if len(item) > 2 else "item"
+            if value is None:
+                print(f"\n  {C.DIM}{C.BOLD}{label}{C.RST}")
+            elif i == selected:
                 print(f"  {C.BG_BLUE}{C.WHITE}{C.BOLD}  {label:<32}  {C.RST}")
+            elif kind == "danger":
+                print(f"    {C.RED}{label}{C.RST}")
             else:
                 print(f"    {label}")
         print(f"\n  {C.DIM}↑↓ navigate   Enter select   q quit{C.RST}")
@@ -143,9 +154,11 @@ def menu(title, options, hint=""):
 
         key = _read_key()
         if key == "UP":
-            selected = (selected - 1) % len(options)
+            idx = selectable.index(selected)
+            selected = selectable[(idx - 1) % len(selectable)]
         elif key == "DOWN":
-            selected = (selected + 1) % len(options)
+            idx = selectable.index(selected)
+            selected = selectable[(idx + 1) % len(selectable)]
         elif key == "ENTER":
             return options[selected][1]
         elif key in ("QUIT", "ESC"):
@@ -292,6 +305,18 @@ def _print_vm_ready(vm_name, os_name, version, mgmt_ip, cfg):
         info(f"Check with: virsh net-dhcp-leases {cfg['MGMT_NET']}")
 
 
+def _offer_ssh(mgmt_ip):
+    if not mgmt_ip or not sys.stdin.isatty():
+        return
+    answer = input(f"\n  {C.CYAN}?{C.RST}  Connect via SSH now? [Y/n]: ").strip().lower()
+    if answer in ("", "y", "yes"):
+        print()
+        subprocess.run(
+            ["ssh", "-o", "StrictHostKeyChecking=no", f"root@{mgmt_ip}"],
+            check=False,
+        )
+
+
 def create_vm(os_name, version, vm_name, ram, vcpus, cfg):
     base_image = cfg["ORIGINAL_DIR"] / f"{os_name}-{version}-base.qcow2"
     vm_disk    = cfg["VMS_DIR"] / f"{vm_name}.qcow2"
@@ -359,6 +384,8 @@ def create_vm(os_name, version, vm_name, ram, vcpus, cfg):
             print(f"  {C.DIM}subscription-manager register --username USER --password PASS --auto-attach")
             print(f"  dnf install -y bash-completion vim{C.RST}")
 
+    _offer_ssh(mgmt_ip)
+
 # ── Core: ks-test ─────────────────────────────────────────────────────────────
 
 def ks_test_vm(ks_path, iso_path, os_name, version, vm_name, ram, vcpus, disk_gb, cfg):
@@ -411,6 +438,7 @@ def ks_test_vm(ks_path, iso_path, os_name, version, vm_name, ram, vcpus, disk_gb
     info("Waiting for DHCP lease on management network...")
     mgmt_ip = _wait_for_ip(vm_name, cfg["MGMT_NET"])
     _print_vm_ready(vm_name, os_name, version, mgmt_ip, cfg)
+    _offer_ssh(mgmt_ip)
 
 # ── Core: destroy ─────────────────────────────────────────────────────────────
 
@@ -888,12 +916,21 @@ def _interactive_list_kickstarts(cfg):
     _pause()
 
 
+def _main_menu_hint(cfg):
+    r = virsh("list", "--name")
+    running = len([n for n in r.stdout.splitlines() if n.strip()])
+    label = "VM" if running == 1 else "VMs"
+    return f"{running} {label} running   ·   config: {CONFIG_FILE}"
+
+
 def interactive_main(cfg):
     actions = [
+        ("── Provisioning ──",                   None),
         ("Build image  (OS → golden qcow2)",    "build"),
         ("Create VM    (golden → linked clone)", "create"),
         ("Install VM from ISO+ks",               "ks-test"),
-        ("Destroy VM",                           "destroy"),
+        ("Destroy VM",                           "destroy", "danger"),
+        ("── Info ──",                           None),
         ("List VMs",                             "list"),
         ("List images",                          "images"),
         ("List sources",                         "sources"),
@@ -902,7 +939,7 @@ def interactive_main(cfg):
         ("Quit",                                 "quit"),
     ]
     while True:
-        action = menu("Main menu", actions)
+        action = menu("Main menu", actions, _main_menu_hint(cfg))
         if action in (None, "quit"):
             sys.stdout.write("\033[2J\033[H\n")
             break
