@@ -81,6 +81,9 @@ vmbuilder kickstarts
 
 # Destroy a VM
 vmbuilder destroy testlab-01
+
+# Show version
+vmbuilder --version
 ```
 
 ## What gets applied to golden images (build)
@@ -88,10 +91,15 @@ vmbuilder destroy testlab-01
 | Operation                         | RHEL | Rocky | Debian |
 |------------------------------------|:----:|:-----:|:------:|
 | Root password (`Test1234!`)        | ✓    | ✓     | ✓      |
-| Remove cloud-init                 | ✓    | ✓     | ✓      |
+| Remove cloud-init (if present)²   | ✓    | ✓     | ✓      |
+| Install openssh-server            | ✓    | ✓     | ✓      |
 | PermitRootLogin yes               | ✓    | ✓     | ✓      |
 | NIC naming kernel arg             | ✓    | ✓     | ✓      |
 | bash-completion + vim             | ¹    | ✓     | ✓      |
+
+² Minimal source images (e.g. Debian's "nocloud" qcow2 variant) may not include
+cloud-init or openssh-server — both steps are safe no-ops/installs regardless of
+whether the package was already present.
 
 ¹ RHEL requires an active subscription — packages must be installed after boot.
 

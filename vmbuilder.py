@@ -13,7 +13,7 @@ import datetime
 from pathlib import Path
 from textwrap import dedent
 
-__version__    = "1.0"
+__version__    = "1.1"
 __build_date__ = "13082026"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -216,6 +216,7 @@ def build_image(os_name, version, src, cfg):
         "virt-customize", "-a", str(dest),
         "--root-password", f"password:{cfg['ROOT_PASSWORD']}",
         "--run-command", remove_cloud_init,
+        "--install", "openssh-server",
         "--run-command",
         "sed -i '/^#*PermitRootLogin/d' /etc/ssh/sshd_config "
         "&& echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config",
