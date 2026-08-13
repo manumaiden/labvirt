@@ -37,7 +37,14 @@ command is available from any directory.
 vmbuilder
 ```
 
-Navigate with arrow keys ↑↓, Enter to select, `q` to quit.
+Navigate with arrow keys ↑↓, Enter to select, `q` to quit. The main menu is
+grouped into "Provisioning" / "Info" sections, shows a status line (running VM
+count + active config path), and displays the equivalent CLI command next to
+the currently highlighted item.
+
+After `create` or `ks-test` finishes and the management IP is detected, you're
+asked `Connect via SSH now? [Y/n]` — confirming opens an interactive SSH
+session right in the same terminal.
 
 ### Direct CLI
 

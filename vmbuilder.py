@@ -202,10 +202,16 @@ def build_image(os_name, version, src, cfg):
 
     info("Running virt-customize...")
 
+    if os_name == "debian":
+        remove_cloud_init = "dpkg -s cloud-init >/dev/null 2>&1 && apt-get remove -y cloud-init || true"
+    else:
+        remove_cloud_init = ("rpm -q cloud-init >/dev/null 2>&1 "
+                              "&& (dnf remove -y cloud-init || yum remove -y cloud-init) || true")
+
     args = [
         "virt-customize", "-a", str(dest),
         "--root-password", f"password:{cfg['ROOT_PASSWORD']}",
-        "--uninstall", "cloud-init",
+        "--run-command", remove_cloud_init,
         "--run-command",
         "sed -i '/^#*PermitRootLogin/d' /etc/ssh/sshd_config "
         "&& echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config",
