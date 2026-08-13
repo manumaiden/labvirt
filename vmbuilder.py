@@ -13,6 +13,9 @@ import datetime
 from pathlib import Path
 from textwrap import dedent
 
+__version__    = "1.0"
+__build_date__ = "13082026"
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 # resolve() before parent so symlinks in ~/bin point back to the real project dir
@@ -137,6 +140,7 @@ def menu(title, options, hint="", descriptions=None):
         sys.stdout.write("\033[2J\033[H")
         print(f"\n  {C.BOLD}{C.CYAN}vmbuilder{C.RST}  "
               f"{C.DIM}RHEL · Rocky · Debian lab launcher{C.RST}")
+        print(f"  {C.DIM}version {__version__} ({__build_date__}) by manumaiden{C.RST}")
         print(f"  {C.DIM}{'─' * 50}{C.RST}\n")
         if hint:
             print(f"  {C.YELLOW}{hint}{C.RST}\n")
@@ -992,6 +996,10 @@ def interactive_main(cfg):
 def cli_main(cfg):
     ap  = argparse.ArgumentParser(prog="vmbuilder.py",
                                   description="RHEL/Rocky/Debian lab VM launcher")
+    ap.add_argument(
+        "-v", "--version", action="version",
+        version=f"vmbuilder version {__version__} ({__build_date__}) by manumaiden",
+    )
     sub = ap.add_subparsers(dest="cmd")
 
     pb = sub.add_parser("build",   help="Build a golden image")
