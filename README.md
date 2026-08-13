@@ -43,8 +43,9 @@ count + active config path), and displays the equivalent CLI command next to
 the currently highlighted item.
 
 After `create` or `ks-test` finishes and the management IP is detected, you're
-asked `Connect via SSH now? [Y/n]` — confirming opens an interactive SSH
-session right in the same terminal.
+asked `Connect via SSH now? [Y/n]` — confirming waits (up to 90s) for sshd to
+actually start accepting connections, then opens an interactive SSH session
+right in the same terminal.
 
 ### Direct CLI
 
@@ -92,14 +93,22 @@ vmbuilder --version
 |------------------------------------|:----:|:-----:|:------:|
 | Root password (`Test1234!`)        | ✓    | ✓     | ✓      |
 | Remove cloud-init (if present)²   | ✓    | ✓     | ✓      |
-| Install openssh-server            | ✓    | ✓     | ✓      |
+| Install openssh-server (if missing)² | ✓ | ✓     | ✓      |
+| Timezone (UTC)³                   |      |       | ✓      |
 | PermitRootLogin yes               | ✓    | ✓     | ✓      |
 | NIC naming kernel arg             | ✓    | ✓     | ✓      |
 | bash-completion + vim             | ¹    | ✓     | ✓      |
 
 ² Minimal source images (e.g. Debian's "nocloud" qcow2 variant) may not include
-cloud-init or openssh-server — both steps are safe no-ops/installs regardless of
-whether the package was already present.
+cloud-init or openssh-server — both checks are local (`dpkg -s`/`rpm -q`) so
+`apt`/`dnf`/`yum` only run when actually needed, avoiding hard failures on RHEL
+(no repos without a subscription) or Debian (empty apt cache — `apt-get update`
+runs first, and `virt-customize --network` gives the build appliance internet
+access).
+
+³ Without a preset timezone, Debian's `systemd-firstboot.service` blocks the
+VM's first real boot waiting for interactive input on the serial console,
+which never arrives in an unattended `create` — so `sshd` never starts.
 
 ¹ RHEL requires an active subscription — packages must be installed after boot.
 
