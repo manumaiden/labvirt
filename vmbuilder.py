@@ -6,6 +6,7 @@ import sys
 import tty
 import termios
 import subprocess
+import socket
 import time
 import argparse
 import shlex
@@ -13,7 +14,7 @@ import datetime
 from pathlib import Path
 from textwrap import dedent
 
-__version__    = "1.1"
+__version__    = "1.5"
 __build_date__ = "13082026"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -208,15 +209,19 @@ def build_image(os_name, version, src, cfg):
 
     if os_name == "debian":
         remove_cloud_init = "dpkg -s cloud-init >/dev/null 2>&1 && apt-get remove -y cloud-init || true"
+        ensure_openssh    = ("dpkg -s openssh-server >/dev/null 2>&1 "
+                              "|| (apt-get update && apt-get install -y openssh-server)")
     else:
         remove_cloud_init = ("rpm -q cloud-init >/dev/null 2>&1 "
                               "&& (dnf remove -y cloud-init || yum remove -y cloud-init) || true")
+        ensure_openssh    = ("rpm -q openssh-server >/dev/null 2>&1 "
+                              "|| (dnf install -y openssh-server || yum install -y openssh-server)")
 
     args = [
-        "virt-customize", "-a", str(dest),
+        "virt-customize", "-a", str(dest), "--network",
         "--root-password", f"password:{cfg['ROOT_PASSWORD']}",
         "--run-command", remove_cloud_init,
-        "--install", "openssh-server",
+        "--run-command", ensure_openssh,
         "--run-command",
         "sed -i '/^#*PermitRootLogin/d' /etc/ssh/sshd_config "
         "&& echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config",
@@ -229,6 +234,7 @@ def build_image(os_name, version, src, cfg):
             args += ["--install", "bash-completion,vim"]
     elif os_name == "debian":
         args += [
+            "--timezone", "UTC",
             "--run-command",
             "sed -i '/^GRUB_CMDLINE_LINUX=/s/\"$/ net.ifnames=0 biosdevname=0\"/' "
             "/etc/default/grub && update-grub",
@@ -321,11 +327,31 @@ def _print_vm_ready(vm_name, os_name, version, mgmt_ip, cfg):
         info(f"Check with: virsh net-dhcp-leases {cfg['MGMT_NET']}")
 
 
+def _wait_for_ssh_port(mgmt_ip, timeout=90):
+    deadline = time.time() + timeout
+    elapsed = 0
+    while time.time() < deadline:
+        try:
+            with socket.create_connection((mgmt_ip, 22), timeout=2):
+                return True
+        except OSError:
+            time.sleep(2)
+            elapsed += 2
+            if elapsed % 10 == 0:
+                info(f"Still waiting for sshd... ({elapsed}s)")
+    return False
+
+
 def _offer_ssh(mgmt_ip):
     if not mgmt_ip or not sys.stdin.isatty():
         return
     answer = input(f"\n  {C.CYAN}?{C.RST}  Connect via SSH now? [Y/n]: ").strip().lower()
     if answer in ("", "y", "yes"):
+        info("Waiting for SSH to become available...")
+        if not _wait_for_ssh_port(mgmt_ip):
+            warn("SSH did not come up in time — try connecting manually in a few seconds:")
+            print(f"  {C.DIM}ssh root@{mgmt_ip}{C.RST}")
+            return
         print()
         subprocess.run(
             ["ssh", "-o", "StrictHostKeyChecking=no", f"root@{mgmt_ip}"],
