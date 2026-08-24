@@ -14,7 +14,7 @@ import datetime
 from pathlib import Path
 from textwrap import dedent
 
-__version__    = "1.5"
+__version__    = "1.6"
 __build_date__ = "13082026"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -740,6 +740,36 @@ def list_kickstarts(cfg):
         print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
     print()
 
+# ── Core: about ───────────────────────────────────────────────────────────────
+
+def show_about(cfg):
+    print()
+    print(f"  {C.BOLD}{C.CYAN}vmbuilder{C.RST}  {C.DIM}RHEL / Rocky / Debian lab VM launcher{C.RST}")
+    print(f"  {C.DIM}version {__version__} ({__build_date__}) by manumaiden{C.RST}")
+    print()
+    print("  Spin up local KVM/libvirt VMs for ephemeral test labs —")
+    print("  bonding, teaming, NIC renaming, and more.")
+    print()
+    print(f"  {C.BOLD}Quick start{C.RST}")
+    print(f"    1. Build a golden image once per OS/version   {C.DIM}→ Build image{C.RST}")
+    print(f"    2. Create VMs from it (fast linked clones)    {C.DIM}→ Create VM{C.RST}")
+    print(f"    3. Or install fresh from ISO + kickstart      {C.DIM}→ Install VM from ISO+ks{C.RST}")
+    print(f"    4. Tear down when done                        {C.DIM}→ Destroy VM{C.RST}")
+    print()
+    print(f"  {C.BOLD}Network per VM{C.RST}")
+    print("    NIC1    default   192.168.122.x   management / SSH / internet")
+    print("    NIC2-4  lab-net   10.10.10.x      isolated lab network (auto-created)")
+    print()
+    print(f"  {C.BOLD}Requirements{C.RST}")
+    print("    libvirt, virt-install, virt-customize (guestfs-tools), qemu-img")
+    print()
+    print(f"  {C.BOLD}Config file{C.RST}")
+    print(f"    {CONFIG_FILE}")
+    print()
+    print(f"  {C.BOLD}Supported OS{C.RST}")
+    print("    RHEL 7.9-10.2 · Rocky 7.9-10.2 · Debian 12/13")
+    print()
+
 # ── Interactive flows ─────────────────────────────────────────────────────────
 
 def _list_sources(sources_dir):
@@ -958,6 +988,12 @@ def _interactive_list_kickstarts(cfg):
     _pause()
 
 
+def _interactive_about(cfg):
+    sys.stdout.write("\033[2J\033[H")
+    show_about(cfg)
+    _pause()
+
+
 def _main_menu_hint(cfg):
     r = virsh("list", "--name")
     running = len([n for n in r.stdout.splitlines() if n.strip()])
@@ -978,6 +1014,7 @@ def interactive_main(cfg):
         ("List sources",                         "sources"),
         ("List ISOs",                            "isos"),
         ("List kickstarts",                      "kickstarts"),
+        ("About",                                "about"),
         ("Quit",                                 "quit"),
     ]
     descriptions = {
@@ -990,6 +1027,7 @@ def interactive_main(cfg):
         "sources":    "vmbuilder sources",
         "isos":       "vmbuilder isos",
         "kickstarts": "vmbuilder kickstarts",
+        "about":      "vmbuilder about",
     }
     while True:
         action = menu("Main menu", actions, _main_menu_hint(cfg), descriptions)
@@ -1017,6 +1055,8 @@ def interactive_main(cfg):
             _interactive_list_isos(cfg)
         elif action == "kickstarts":
             _interactive_list_kickstarts(cfg)
+        elif action == "about":
+            _interactive_about(cfg)
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -1049,6 +1089,7 @@ def cli_main(cfg):
     sub.add_parser("sources",     help="List raw qcow2 source images in SOURCES_DIR")
     sub.add_parser("isos",        help="List ISO files in KS_ISO_DIR")
     sub.add_parser("kickstarts",  help="List kickstart files in KS_PATH")
+    sub.add_parser("about",       help="Show program info and quick start")
 
     pk = sub.add_parser("ks-test", help="Install a VM from ISO + kickstart")
     pk.add_argument("--ks",      default=str(cfg["KS_PATH"]) if cfg.get("KS_PATH") else None,
@@ -1090,6 +1131,8 @@ def cli_main(cfg):
         list_isos(cfg)
     elif args.cmd == "kickstarts":
         list_kickstarts(cfg)
+    elif args.cmd == "about":
+        show_about(cfg)
     else:
         ap.print_help()
 
