@@ -14,7 +14,7 @@ import datetime
 from pathlib import Path
 from textwrap import dedent
 
-__version__    = "1.6"
+__version__    = "1.7"
 __build_date__ = "13082026"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -30,6 +30,29 @@ SUPPORTED_OS = {
     "rocky":  ["7.9", "8.10", "9.8", "10.2"],
     "debian": ["12", "13"],
 }
+
+# Full accepted version range per OS (CLI --version). SUPPORTED_OS above stays
+# a curated pick-list for the TUI menu, which can't offer free-text entry.
+SUPPORTED_OS_RANGE = {
+    "rhel":   ("7.9", "10.2"),
+    "rocky":  ("7.9", "10.2"),
+    "debian": ("12", "13"),
+}
+
+def _parse_version(v):
+    try:
+        return tuple(int(p) for p in v.split("."))
+    except ValueError:
+        return None
+
+def _version_supported(os_name, version):
+    lo, hi = SUPPORTED_OS_RANGE.get(os_name, (None, None))
+    if lo is None:
+        return False
+    v, v_lo, v_hi = _parse_version(version), _parse_version(lo), _parse_version(hi)
+    if v is None or v_lo is None or len(v) != len(v_lo):
+        return False
+    return v_lo <= v <= v_hi
 
 OS_VARIANTS = {
     "rhel-7.9":   "rhel7.9",
@@ -1105,10 +1128,10 @@ def cli_main(cfg):
     args = ap.parse_args()
 
     if args.cmd in ("build", "create", "ks-test"):
-        valid = SUPPORTED_OS.get(args.os, [])
-        if args.version not in valid:
+        if not _version_supported(args.os, args.version):
+            lo, hi = SUPPORTED_OS_RANGE.get(args.os, ("?", "?"))
             ap.error(f"unsupported version '{args.version}' for --os {args.os}. "
-                     f"Supported: {', '.join(valid)}")
+                     f"Supported range: {lo} – {hi}")
 
     if args.cmd == "build":
         build_image(args.os, args.version, args.src, cfg)

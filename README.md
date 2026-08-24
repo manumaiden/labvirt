@@ -37,11 +37,18 @@ shown next to the highlighted item:
 
 ## Supported OS
 
-| Distro      | Version                    |
-|-------------|----------------------------|
-| RHEL        | 7.9, 8.10, 9.7, 9.8, 10.2 |
-| Rocky Linux | 7.9, 8.10, 9.8, 10.2      |
-| Debian      | 12 (Bookworm), 13 (Trixie) |
+| Distro      | Version range              |
+|-------------|-----------------------------|
+| RHEL        | 7.9 → 10.2                |
+| Rocky Linux | 7.9 → 10.2                |
+| Debian      | 12 (Bookworm) → 13 (Trixie) |
+
+Any `X.Y` release in range works with `--version` on the CLI. The
+interactive menu shows a curated pick-list of common point releases
+(`7.9, 8.10, 9.7, 9.8, 10.2` for RHEL, etc.) for quick selection — versions
+outside that pick-list still work via CLI, just without a dedicated
+`virt-install --os-variant` hint (falls back to `generic`, still fully
+functional).
 
 ## Requirements
 
