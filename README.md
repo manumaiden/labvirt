@@ -1,4 +1,4 @@
-# vmbuilder
+# labvirt
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -6,7 +6,7 @@
 
 Testing bonding, NIC teaming, or network configs usually means either burning
 cloud credits or hand-holding `virt-install` through a dozen flags every
-time. `vmbuilder` turns that into two commands: provision a golden image
+time. `labvirt` turns that into two commands: provision a golden image
 once, then spin up disposable VMs — each pre-wired with a 4-NIC lab topology
 (1 management + 3 isolated) — in under a minute, from an interactive menu or
 straight from the CLI. Built for local KVM/libvirt lab work: quick,
@@ -33,7 +33,7 @@ throwaway VMs you build, break, and destroy without ceremony.
 Arrow-key navigation, grouped sections, live status, and the CLI command
 shown next to the highlighted item:
 
-![vmbuilder main menu](docs/screenshots/menu-demo.gif)
+![labvirt main menu](docs/screenshots/menu-demo.gif)
 
 ## Supported OS
 
@@ -54,13 +54,13 @@ shown next to the highlighted item:
 ## Installation
 
 ```bash
-git clone https://github.com/manumaiden/vmbuilder.git
-cd vmbuilder
+git clone https://github.com/manumaiden/labvirt.git
+cd labvirt
 ./install.sh
 source ~/.bashrc   # first time only, if ~/bin wasn't already in PATH
 ```
 
-Creates a `~/bin/vmbuilder` → `vmbuilder.py` symlink. After installation the
+Creates a `~/bin/labvirt` → `labvirt.py` symlink. After installation the
 command is available from any directory.
 
 ## Usage
@@ -68,7 +68,7 @@ command is available from any directory.
 ### Interactive menu
 
 ```bash
-vmbuilder
+labvirt
 ```
 
 Navigate with arrow keys ↑↓, Enter to select, `q` to quit. The main menu is
@@ -77,7 +77,7 @@ count + active config path), and displays the equivalent CLI command next to
 the currently highlighted item. The "About" entry shows a quick-start
 reference without leaving the menu:
 
-![vmbuilder about screen](docs/screenshots/about.png)
+![labvirt about screen](docs/screenshots/about.png)
 
 After `create` or `ks-test` finishes and the management IP is detected, you're
 asked `Connect via SSH now? [Y/n]` — confirming waits (up to 90s) for sshd to
@@ -88,43 +88,43 @@ right in the same terminal.
 
 ```bash
 # Step 1 — Build the golden image (once per OS version)
-vmbuilder build --os rocky  --version 9.8  --src ~/downloads/Rocky-9.8-x86_64.qcow2
-vmbuilder build --os rhel   --version 9.8  --src ~/downloads/rhel-9.8-x86_64.qcow2
-vmbuilder build --os debian --version 12   --src ~/downloads/debian-12-amd64.qcow2
+labvirt build --os rocky  --version 9.8  --src ~/downloads/Rocky-9.8-x86_64.qcow2
+labvirt build --os rhel   --version 9.8  --src ~/downloads/rhel-9.8-x86_64.qcow2
+labvirt build --os debian --version 12   --src ~/downloads/debian-12-amd64.qcow2
 
 # Step 2 — Create a VM
-vmbuilder create --os rocky --version 9.8 --name testlab-01
-vmbuilder create --os rhel  --version 8.10 --name rhel-test --ram 4096 --vcpus 4
+labvirt create --os rocky --version 9.8 --name testlab-01
+labvirt create --os rhel  --version 8.10 --name rhel-test --ram 4096 --vcpus 4
 
 # Fresh install from ISO + kickstart (without a golden image)
-vmbuilder ks-test --os rocky --version 9.8 \
+labvirt ks-test --os rocky --version 9.8 \
   --iso ~/isos/Rocky-9.8-x86_64-dvd.iso \
   --ks kickstarts/ks_rocky9.cfg \
   --name ks-rocky9
 
 # List VMs (with management IP for running VMs)
-vmbuilder list
+labvirt list
 
 # List golden images in ORIGINAL_DIR
-vmbuilder images
+labvirt images
 
 # List raw qcow2 source images in SOURCES_DIR
-vmbuilder sources
+labvirt sources
 
 # List ISO files in KS_ISO_DIR
-vmbuilder isos
+labvirt isos
 
 # List kickstart files in KS_PATH
-vmbuilder kickstarts
+labvirt kickstarts
 
 # Destroy a VM
-vmbuilder destroy testlab-01
+labvirt destroy testlab-01
 
 # Quick-start reference
-vmbuilder about
+labvirt about
 
 # Show version
-vmbuilder --version
+labvirt --version
 ```
 
 ## What gets applied to golden images (build)
@@ -169,7 +169,7 @@ doesn't exist yet.
 ```bash
 export RHSM_USER="user"
 export RHSM_PASS="password"
-vmbuilder create --os rhel --version 9.8 --name rhel-test
+labvirt create --os rhel --version 9.8 --name rhel-test
 ```
 
 With these variables set, registration and installation of `bash-completion`
@@ -177,7 +177,7 @@ and `vim` run automatically via SSH after boot.
 
 ## Configuration
 
-`install.sh` automatically copies the config to `~/.vmbuilder.conf` on first
+`install.sh` automatically copies the config to `~/.labvirt.conf` on first
 install. Make all changes there — the file in the repo (`configs/lab.conf`)
 stays untouched even after a `git pull`.
 
@@ -221,10 +221,10 @@ KS_DISK_SIZE=20
 
 ### Config lookup
 
-1. `~/.vmbuilder.conf` — user config (created by `install.sh`)
+1. `~/.labvirt.conf` — user config (created by `install.sh`)
 2. `<repo>/configs/lab.conf` — fallback/template
 
-This is a **whole-file selection, not a per-key merge**: if `~/.vmbuilder.conf`
+This is a **whole-file selection, not a per-key merge**: if `~/.labvirt.conf`
 exists, it is read in full and `configs/lab.conf` is not consulted at all —
 even for keys missing from the user config. Any variable without a hardcoded
 fallback in the code (e.g. `MGMT_NET`, `LAB_NET*`, `ROOT_PASSWORD`) must be
@@ -245,15 +245,15 @@ The script uses `sudo` internally for all privileged operations:
 - `virt-install` / `virt-customize` — provisioning
 - `mkdir` / `cp` / `rm` — storage path operations
 
-You do not need to run `vmbuilder` with `sudo` — the prefix is added
+You do not need to run `labvirt` with `sudo` — the prefix is added
 automatically where needed.
 
 ## Project structure
 
 ```
-vmbuilder/
-├── vmbuilder.py        # Single entry point (TUI menu + CLI)
-├── install.sh          # Installs vmbuilder into ~/bin, creates ~/.vmbuilder.conf
+labvirt/
+├── labvirt.py        # Single entry point (TUI menu + CLI)
+├── install.sh          # Installs labvirt into ~/bin, creates ~/.labvirt.conf
 ├── configs/
 │   └── lab.conf        # Configuration template (do not edit directly)
 ├── kickstarts/
@@ -278,7 +278,7 @@ registered in the United States and other countries. Rocky Linux is a
 trademark of the Rocky Enterprise Software Foundation. Debian is a trademark
 of Software in the Public Interest, Inc. This is an independent, unofficial
 project — it is not affiliated with, sponsored by, or endorsed by any of the
-above. `vmbuilder` never downloads, bundles, or redistributes any OS
+above. `labvirt` never downloads, bundles, or redistributes any OS
 installation media — you provide your own qcow2 images / ISOs, obtained
 directly from the respective vendor under your own account and license
 terms.

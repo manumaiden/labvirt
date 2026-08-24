@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""vmbuilder — RHEL / Rocky / Debian lab VM launcher"""
+"""labvirt — RHEL / Rocky / Debian lab VM launcher"""
 
 import os
 import sys
@@ -21,7 +21,7 @@ __build_date__ = "13082026"
 
 # resolve() before parent so symlinks in ~/bin point back to the real project dir
 SCRIPT_DIR      = Path(__file__).resolve().parent
-USER_CONFIG     = Path.home() / ".vmbuilder.conf"
+USER_CONFIG     = Path.home() / ".labvirt.conf"
 DEFAULT_CONFIG  = SCRIPT_DIR / "configs" / "lab.conf"
 CONFIG_FILE     = USER_CONFIG if USER_CONFIG.exists() else DEFAULT_CONFIG
 
@@ -139,7 +139,7 @@ def menu(title, options, hint="", descriptions=None):
     selected = selectable[0]
     while True:
         sys.stdout.write("\033[2J\033[H")
-        print(f"\n  {C.BOLD}{C.CYAN}vmbuilder{C.RST}  "
+        print(f"\n  {C.BOLD}{C.CYAN}labvirt{C.RST}  "
               f"{C.DIM}RHEL · Rocky · Debian lab launcher{C.RST}")
         print(f"  {C.DIM}version {__version__} ({__build_date__}) by manumaiden{C.RST}")
         print(f"  {C.DIM}{'─' * 50}{C.RST}\n")
@@ -271,7 +271,7 @@ def _ensure_lab_net(cfg):
                 </dhcp>
               </ip>
             </network>""")
-        xml_path = Path("/tmp/vmbuilder-lab-net.xml")
+        xml_path = Path("/tmp/labvirt-lab-net.xml")
         xml_path.write_text(xml)
         run(["virsh", "net-define",    str(xml_path)], sudo=True)
         run(["virsh", "net-start",     cfg["LAB_NET"]], sudo=True)
@@ -365,7 +365,7 @@ def create_vm(os_name, version, vm_name, ram, vcpus, cfg):
 
     if not _exists(base_image):
         err(f"Golden image not found: {base_image}")
-        err(f"Run: ./vmbuilder.py build --os {os_name} --version {version} --src <path>")
+        err(f"Run: ./labvirt.py build --os {os_name} --version {version} --src <path>")
         sys.exit(1)
 
     if virsh("dominfo", vm_name).returncode == 0:
@@ -744,7 +744,7 @@ def list_kickstarts(cfg):
 
 def show_about(cfg):
     print()
-    print(f"  {C.BOLD}{C.CYAN}vmbuilder{C.RST}  {C.DIM}RHEL / Rocky / Debian lab VM launcher{C.RST}")
+    print(f"  {C.BOLD}{C.CYAN}labvirt{C.RST}  {C.DIM}RHEL / Rocky / Debian lab VM launcher{C.RST}")
     print(f"  {C.DIM}version {__version__} ({__build_date__}) by manumaiden{C.RST}")
     print()
     print("  Spin up local KVM/libvirt VMs for ephemeral test labs —")
@@ -1018,16 +1018,16 @@ def interactive_main(cfg):
         ("Quit",                                 "quit"),
     ]
     descriptions = {
-        "build":      "vmbuilder build --os <os> --version <ver> --src <path>",
-        "create":     "vmbuilder create --os <os> --version <ver> --name <name>",
-        "ks-test":    "vmbuilder ks-test --os <os> --version <ver> --iso <iso> --ks <ks> --name <name>",
-        "destroy":    "vmbuilder destroy <name>",
-        "list":       "vmbuilder list",
-        "images":     "vmbuilder images",
-        "sources":    "vmbuilder sources",
-        "isos":       "vmbuilder isos",
-        "kickstarts": "vmbuilder kickstarts",
-        "about":      "vmbuilder about",
+        "build":      "labvirt build --os <os> --version <ver> --src <path>",
+        "create":     "labvirt create --os <os> --version <ver> --name <name>",
+        "ks-test":    "labvirt ks-test --os <os> --version <ver> --iso <iso> --ks <ks> --name <name>",
+        "destroy":    "labvirt destroy <name>",
+        "list":       "labvirt list",
+        "images":     "labvirt images",
+        "sources":    "labvirt sources",
+        "isos":       "labvirt isos",
+        "kickstarts": "labvirt kickstarts",
+        "about":      "labvirt about",
     }
     while True:
         action = menu("Main menu", actions, _main_menu_hint(cfg), descriptions)
@@ -1061,11 +1061,11 @@ def interactive_main(cfg):
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 def cli_main(cfg):
-    ap  = argparse.ArgumentParser(prog="vmbuilder.py",
+    ap  = argparse.ArgumentParser(prog="labvirt.py",
                                   description="RHEL/Rocky/Debian lab VM launcher")
     ap.add_argument(
         "-v", "--version", action="version",
-        version=f"vmbuilder version {__version__} ({__build_date__}) by manumaiden",
+        version=f"labvirt version {__version__} ({__build_date__}) by manumaiden",
     )
     sub = ap.add_subparsers(dest="cmd")
 

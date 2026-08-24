@@ -1,11 +1,11 @@
 #!/bin/bash
-# Installs vmbuilder as a symlink in ~/bin
+# Installs labvirt as a symlink in ~/bin
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VMBUILDER_SRC="${SCRIPT_DIR}/vmbuilder.py"
+LABVIRT_SRC="${SCRIPT_DIR}/labvirt.py"
 BIN_DIR="${HOME}/bin"
-SYMLINK="${BIN_DIR}/vmbuilder"
+SYMLINK="${BIN_DIR}/labvirt"
 
 # ── Create ~/bin if missing ───────────────────────────────────────────────────
 if [[ ! -d "$BIN_DIR" ]]; then
@@ -14,9 +14,9 @@ if [[ ! -d "$BIN_DIR" ]]; then
 fi
 
 # ── Create/update symlink ─────────────────────────────────────────────────────
-ln -sf "$VMBUILDER_SRC" "$SYMLINK"
-chmod +x "$VMBUILDER_SRC"
-echo "  Symlink: $SYMLINK → $VMBUILDER_SRC"
+ln -sf "$LABVIRT_SRC" "$SYMLINK"
+chmod +x "$LABVIRT_SRC"
+echo "  Symlink: $SYMLINK → $LABVIRT_SRC"
 
 # ── Ensure ~/bin is in PATH ───────────────────────────────────────────────────
 PATH_LINE='export PATH="$HOME/bin:$PATH"'
@@ -28,7 +28,7 @@ if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
         if [[ -f "$RC" ]]; then
             if ! grep -qF 'HOME/bin' "$RC"; then
                 echo "" >> "$RC"
-                echo "# added by vmbuilder install" >> "$RC"
+                echo "# added by labvirt install" >> "$RC"
                 echo "$PATH_LINE" >> "$RC"
                 ADDED_TO="$RC"
             fi
@@ -49,8 +49,8 @@ else
     echo "  ~/bin already in PATH"
 fi
 
-# ── Copy default config to ~/.vmbuilder.conf if not already present ───────────
-USER_CONF="${HOME}/.vmbuilder.conf"
+# ── Copy default config to ~/.labvirt.conf if not already present ───────────
+USER_CONF="${HOME}/.labvirt.conf"
 if [[ ! -f "$USER_CONF" ]]; then
     cp "${SCRIPT_DIR}/configs/lab.conf" "$USER_CONF"
     echo "  Config:  $USER_CONF (copied from default)"
@@ -61,4 +61,4 @@ fi
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "  Installation complete."
-echo "  Run: vmbuilder"
+echo "  Run: labvirt"
