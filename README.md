@@ -1,6 +1,38 @@
 # vmbuilder
 
-Spin up local RHEL/Rocky/Debian lab VMs in seconds.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+**Spin up local RHEL/Rocky/Debian lab VMs in seconds.**
+
+Testing bonding, NIC teaming, or network configs usually means either burning
+cloud credits or hand-holding `virt-install` through a dozen flags every
+time. `vmbuilder` turns that into two commands: provision a golden image
+once, then spin up disposable VMs — each pre-wired with a 4-NIC lab topology
+(1 management + 3 isolated) — in under a minute, from an interactive menu or
+straight from the CLI. Built for local KVM/libvirt lab work: quick,
+throwaway VMs you build, break, and destroy without ceremony.
+
+## Contents
+
+- [Menu preview](#menu-preview)
+- [Supported OS](#supported-os)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Usage](#usage)
+- [What gets applied to golden images](#what-gets-applied-to-golden-images-build)
+- [Network topology](#network-topology-per-vm)
+- [RHEL automatic subscription](#rhel--automatic-subscription-optional)
+- [Configuration](#configuration)
+- [Sudo](#a-note-on-sudo)
+- [Project structure](#project-structure)
+- [License](#license)
+
+## Menu preview
+
+Arrow-key navigation, grouped sections, live status, and the CLI command
+shown next to the highlighted item:
+
+![vmbuilder main menu](docs/screenshots/menu-demo.gif)
 
 ## Supported OS
 
@@ -21,7 +53,8 @@ Spin up local RHEL/Rocky/Debian lab VMs in seconds.
 ## Installation
 
 ```bash
-cd ~/claudeproject/vmbuilder
+git clone https://github.com/manumaiden/vmbuilder.git
+cd vmbuilder
 ./install.sh
 source ~/.bashrc   # first time only, if ~/bin wasn't already in PATH
 ```
@@ -40,7 +73,10 @@ vmbuilder
 Navigate with arrow keys ↑↓, Enter to select, `q` to quit. The main menu is
 grouped into "Provisioning" / "Info" sections, shows a status line (running VM
 count + active config path), and displays the equivalent CLI command next to
-the currently highlighted item.
+the currently highlighted item. The "About" entry shows a quick-start
+reference without leaving the menu:
+
+![vmbuilder about screen](docs/screenshots/about.png)
 
 After `create` or `ks-test` finishes and the management IP is detected, you're
 asked `Connect via SSH now? [Y/n]` — confirming waits (up to 90s) for sshd to
@@ -82,6 +118,9 @@ vmbuilder kickstarts
 
 # Destroy a VM
 vmbuilder destroy testlab-01
+
+# Quick-start reference
+vmbuilder about
 
 # Show version
 vmbuilder --version
@@ -226,3 +265,7 @@ vmbuilder/
 ├── original/           # Provisioned golden images (default)
 └── vms/                # Cloned VM disks (default, created at runtime)
 ```
+
+## License
+
+[MIT](LICENSE) © manumaiden
