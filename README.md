@@ -26,6 +26,7 @@ throwaway VMs you build, break, and destroy without ceremony.
 - [Sudo](#a-note-on-sudo)
 - [Project structure](#project-structure)
 - [License](#license)
+- [Trademarks](#trademarks)
 
 ## Menu preview
 
@@ -130,7 +131,7 @@ vmbuilder --version
 
 | Operation                         | RHEL | Rocky | Debian |
 |------------------------------------|:----:|:-----:|:------:|
-| Root password (`Test1234!`)        | ✓    | ✓     | ✓      |
+| Root password (`Test1234!`)       | ✓    | ✓     | ✓      |
 | Remove cloud-init (if present)²   | ✓    | ✓     | ✓      |
 | Install openssh-server (if missing)² | ✓ | ✓     | ✓      |
 | Timezone (UTC)³                   |      |       | ✓      |
@@ -269,3 +270,15 @@ vmbuilder/
 ## License
 
 [MIT](LICENSE) © manumaiden
+
+## Trademarks
+
+Red Hat, Red Hat Enterprise Linux, and RHEL are trademarks of Red Hat, Inc.,
+registered in the United States and other countries. Rocky Linux is a
+trademark of the Rocky Enterprise Software Foundation. Debian is a trademark
+of Software in the Public Interest, Inc. This is an independent, unofficial
+project — it is not affiliated with, sponsored by, or endorsed by any of the
+above. `vmbuilder` never downloads, bundles, or redistributes any OS
+installation media — you provide your own qcow2 images / ISOs, obtained
+directly from the respective vendor under your own account and license
+terms.
