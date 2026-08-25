@@ -1,6 +1,7 @@
 # labvirt
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3](https://img.shields.io/badge/Python-3-blue.svg)](https://www.python.org/)
 
 **Spin up local RHEL/Rocky/Debian lab VMs in seconds.**
 
