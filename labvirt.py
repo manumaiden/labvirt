@@ -14,7 +14,7 @@ import datetime
 from pathlib import Path
 from textwrap import dedent
 
-__version__    = "1.8"
+__version__    = "1.9"
 __build_date__ = "26082026"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -866,7 +866,7 @@ def _interactive_build(cfg):
     if sources_dir and _exists(sources_dir):
         choices = _list_sources(sources_dir)
         if choices:
-            choices.append(("[ Inserisci path manualmente ]", "__manual__"))
+            choices.append(("[ Enter path manually ]", "__manual__"))
             picked = menu("Select source qcow2", choices,
                           f"Build golden image — {os_ch} {ver_ch}")
             if not picked:
@@ -923,7 +923,7 @@ def _interactive_ks_test(cfg):
     if iso_dir and _exists(iso_dir):
         choices = _list_isos(iso_dir)
         if choices:
-            choices.append(("[ Inserisci path manualmente ]", "__manual__"))
+            choices.append(("[ Enter path manually ]", "__manual__"))
             picked = menu("Select ISO", choices, f"KS test — {os_ch} {ver_ch}")
             if not picked:
                 return
@@ -935,7 +935,7 @@ def _interactive_ks_test(cfg):
     if ks_cfg and ks_cfg.is_dir():
         choices = _list_ks_files(ks_cfg)
         if choices:
-            choices.append(("[ Inserisci path manualmente ]", "__manual__"))
+            choices.append(("[ Enter path manually ]", "__manual__"))
             picked = menu("Select kickstart", choices, f"KS test — {os_ch} {ver_ch}")
             if not picked:
                 return
@@ -1066,29 +1066,33 @@ def interactive_main(cfg):
         if action in (None, "quit"):
             sys.stdout.write("\033[2J\033[H\n")
             break
-        elif action == "build":
-            _interactive_build(cfg)
-            _pause()
-        elif action == "create":
-            _interactive_create(cfg)
-            _pause()
-        elif action == "ks-test":
-            _interactive_ks_test(cfg)
-            _pause()
-        elif action == "destroy":
-            _interactive_destroy(cfg)
-        elif action == "list":
-            _interactive_list(cfg)
-        elif action == "images":
-            _interactive_list_images(cfg)
-        elif action == "sources":
-            _interactive_list_sources(cfg)
-        elif action == "isos":
-            _interactive_list_isos(cfg)
-        elif action == "kickstarts":
-            _interactive_list_kickstarts(cfg)
-        elif action == "about":
-            _interactive_about(cfg)
+        try:
+            if action == "build":
+                _interactive_build(cfg)
+                _pause()
+            elif action == "create":
+                _interactive_create(cfg)
+                _pause()
+            elif action == "ks-test":
+                _interactive_ks_test(cfg)
+                _pause()
+            elif action == "destroy":
+                _interactive_destroy(cfg)
+            elif action == "list":
+                _interactive_list(cfg)
+            elif action == "images":
+                _interactive_list_images(cfg)
+            elif action == "sources":
+                _interactive_list_sources(cfg)
+            elif action == "isos":
+                _interactive_list_isos(cfg)
+            elif action == "kickstarts":
+                _interactive_list_kickstarts(cfg)
+            elif action == "about":
+                _interactive_about(cfg)
+        except KeyboardInterrupt:
+            print()
+            warn("Cancelled — back to main menu.")
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
