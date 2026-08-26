@@ -14,8 +14,8 @@ import datetime
 from pathlib import Path
 from textwrap import dedent
 
-__version__    = "1.7"
-__build_date__ = "13082026"
+__version__    = "1.8"
+__build_date__ = "26082026"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
