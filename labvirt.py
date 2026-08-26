@@ -514,15 +514,24 @@ def destroy_vm(vm_name, cfg):
 
     info(f"Destroying VM: {vm_name}")
 
+    snaps = virsh("snapshot-list", vm_name, "--name")
+    snap_names = [s.strip() for s in snaps.stdout.splitlines() if s.strip()]
+    if snap_names:
+        warn(f"{len(snap_names)} snapshot(s) found ({', '.join(snap_names)}) — will be deleted too.")
+
     if "running" in virsh("dominfo", vm_name).stdout:
         run(["virsh", "destroy", vm_name], sudo=True)
 
-    r = virsh("undefine", vm_name, "--remove-all-storage")
+    r = virsh("undefine", vm_name, "--remove-all-storage", "--snapshots-metadata")
     if r.returncode != 0:
-        virsh("undefine", vm_name)
+        r = virsh("undefine", vm_name, "--snapshots-metadata")
         leftover = cfg["VMS_DIR"] / f"{vm_name}.qcow2"
         if _exists(leftover):
             run(["rm", "-f", str(leftover)], sudo=True)
+
+    if r.returncode != 0:
+        err(f"Failed to remove VM '{vm_name}': {r.stderr.strip()}")
+        sys.exit(1)
 
     ok(f"VM '{vm_name}' removed.")
 
