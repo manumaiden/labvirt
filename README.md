@@ -1,7 +1,6 @@
 # labvirt
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3](https://img.shields.io/badge/Python-3-blue.svg)](https://www.python.org/)
 
 **Spin up local RHEL/Rocky/Debian lab VMs in seconds.**
 
@@ -41,7 +40,7 @@ shown next to the highlighted item:
 | Distro      | Version range              |
 |-------------|-----------------------------|
 | RHEL        | 7.9 → 10.2                |
-| Rocky Linux | 7.9 → 10.2                |
+| Rocky Linux | 8.10 → 10.2               |
 | Debian      | 12 (Bookworm) → 13 (Trixie) |
 
 Any `X.Y` release in range works with `--version` on the CLI. The
@@ -56,7 +55,7 @@ functional).
 - Linux host with KVM enabled
 - `libvirt`, `virt-install`, `virt-customize` (`guestfs-tools` package)
 - `qemu-img`
-- Python 3.6+
+- Python 3.8+
 - qcow2 images downloaded from the Red Hat / Rocky / Debian portal
 
 ## Installation
@@ -104,7 +103,8 @@ labvirt build --os debian --version 12   --src ~/downloads/debian-12-amd64.qcow2
 labvirt create --os rocky --version 9.8 --name testlab-01
 labvirt create --os rhel  --version 8.10 --name rhel-test --ram 4096 --vcpus 4
 
-# Fresh install from ISO + kickstart (without a golden image)
+# Fresh install from ISO + kickstart (without a golden image) — RHEL/Rocky only,
+# the Debian installer uses preseed, not kickstart
 labvirt ks-test --os rocky --version 9.8 \
   --iso ~/isos/Rocky-9.8-x86_64-dvd.iso \
   --ks kickstarts/ks_rocky9.cfg \
@@ -261,6 +261,7 @@ automatically where needed.
 ```
 labvirt/
 ├── labvirt.py        # Single entry point (TUI menu + CLI)
+├── test_labvirt.py     # Self-checks for parsing logic: python3 test_labvirt.py
 ├── install.sh          # Installs labvirt into ~/bin, creates ~/.labvirt.conf
 ├── configs/
 │   └── lab.conf        # Configuration template (do not edit directly)

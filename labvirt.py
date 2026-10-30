@@ -5,17 +5,20 @@ import os
 import sys
 import tty
 import termios
+import select
 import subprocess
 import socket
 import time
 import argparse
 import shlex
+import json
+import tempfile
 import datetime
 from pathlib import Path
 from textwrap import dedent
 
-__version__    = "1.9"
-__build_date__ = "26082026"
+__version__    = "1.10"
+__build_date__ = "30102026"
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -27,7 +30,7 @@ CONFIG_FILE     = USER_CONFIG if USER_CONFIG.exists() else DEFAULT_CONFIG
 
 SUPPORTED_OS = {
     "rhel":   ["7.9", "8.10", "9.7", "9.8", "10.2"],
-    "rocky":  ["7.9", "8.10", "9.8", "10.2"],
+    "rocky":  ["8.10", "9.8", "10.2"],
     "debian": ["12", "13"],
 }
 
@@ -35,9 +38,17 @@ SUPPORTED_OS = {
 # a curated pick-list for the TUI menu, which can't offer free-text entry.
 SUPPORTED_OS_RANGE = {
     "rhel":   ("7.9", "10.2"),
-    "rocky":  ("7.9", "10.2"),
+    "rocky":  ("8.10", "10.2"),
     "debian": ("12", "13"),
 }
+
+# Kickstart is Anaconda-only: the Debian installer ignores inst.ks and waits on the console
+KS_OS = ["rhel", "rocky"]
+
+# DHCP recycles IPs across ephemeral VMs; a stale known_hosts entry makes ssh
+# silently disable password auth, so never record host keys
+SSH_OPTS = ["-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+            "-o", "LogLevel=ERROR"]
 
 def _parse_version(v):
     try:
@@ -60,7 +71,6 @@ OS_VARIANTS = {
     "rhel-9.7":   "rhel9-unknown",
     "rhel-9.8":   "rhel9-unknown",
     "rhel-10.2":  "generic",
-    "rocky-7.9":  "rhel7.9",
     "rocky-8.10": "rhel8-unknown",
     "rocky-9.8":  "rhel9-unknown",
     "rocky-10.2": "generic",
@@ -97,7 +107,8 @@ def load_config():
                 continue
             if "=" in line:
                 k, _, v = line.partition("=")
-                cfg[k.strip()] = v.strip().strip('"')
+                # shell-style: honours quotes and trailing "# comments"
+                cfg[k.strip()] = (shlex.split(v, comments=True) or [""])[0]
 
     # Resolve storage paths: use lab.conf values if set, else default to script dir
     cfg["ORIGINAL_DIR"] = Path(cfg["ORIGINAL_DIR"]).expanduser() \
@@ -122,6 +133,12 @@ def run(cmd, sudo=False, capture=False, check=True):
         return subprocess.run(cmd, capture_output=True, text=True, check=check)
     return subprocess.run(cmd, check=check)
 
+def _cmd_failed(e):
+    # the tool's own stderr is already on screen; the full argv can be hundreds of chars
+    name = e.cmd[1] if e.cmd[0] == "sudo" else e.cmd[0]
+    err(f"{name} failed (exit {e.returncode})")
+
+
 def virsh(*args):
     return subprocess.run(["sudo", "virsh"] + list(args), capture_output=True, text=True)
 
@@ -129,19 +146,66 @@ def _exists(path):
     r = subprocess.run(["sudo", "test", "-e", str(path)], capture_output=True)
     return r.returncode == 0
 
+
+def _scan(directory, pattern, sudo=True):
+    """[(path, size_bytes, mtime)] of files matching pattern directly inside directory."""
+    cmd = ["find", str(directory), "-maxdepth", "1", "-name", pattern,
+           "-type", "f", "-printf", "%p\\t%s\\t%T@\\n"]
+    r = run(cmd, sudo=sudo, capture=True, check=False)
+    rows = []
+    for line in sorted(r.stdout.splitlines()):
+        path, size, mtime = line.rsplit("\t", 2)
+        rows.append((path, int(size), float(mtime)))
+    return rows
+
+
+def _fmt_size(size):
+    if size >= 1_073_741_824:
+        return f"{size / 1_073_741_824:.1f} GB"
+    if size >= 1_048_576:
+        return f"{size / 1_048_576:.0f} MB"
+    return f"{max(1, size // 1024)} KB"
+
+
+def _backing_users(image, vms_dir):
+    users = []
+    for path, _, _ in _scan(vms_dir, "*.qcow2"):
+        # -U: running VMs hold a write lock on their disk
+        r = run(["qemu-img", "info", "-U", "--output=json", path],
+                sudo=True, capture=True, check=False)
+        try:
+            backing = json.loads(r.stdout).get("full-backing-filename")
+        except ValueError:
+            continue
+        if backing and Path(backing).resolve() == image.resolve():
+            users.append(path)
+    return users
+
 # ── TUI menu ──────────────────────────────────────────────────────────────────
 
 def _read_key():
     fd = sys.stdin.fileno()
     old = termios.tcgetattr(fd)
     try:
-        tty.setraw(fd)
-        ch = sys.stdin.buffer.read(1)
+        # TCSANOW: setraw's default TCSAFLUSH would discard keys already typed
+        tty.setraw(fd, termios.TCSANOW)
+        # os.read, not sys.stdin.buffer: a buffered read would swallow the rest
+        # of an escape sequence and hide it from select()
+        ch = os.read(fd, 1)
         if ch == b"\x1b":
-            rest = sys.stdin.buffer.read(2)
-            if rest == b"[A": return "UP"
-            if rest == b"[B": return "DOWN"
-            return "ESC"
+            if not select.select([fd], [], [], 0.05)[0]:
+                return "ESC"
+            # read exactly one CSI/SS3 sequence (ends at a byte in 0x40-0x7E) so
+            # keys queued behind it (auto-repeat, paste) aren't swallowed
+            seq = os.read(fd, 1)
+            if seq in (b"[", b"O"):
+                for _ in range(8):
+                    seq += os.read(fd, 1)
+                    if 0x40 <= seq[-1] <= 0x7E:
+                        break
+            if seq in (b"[A", b"OA"): return "UP"
+            if seq in (b"[B", b"OB"): return "DOWN"
+            return ""
         if ch in (b"\r", b"\n"):  return "ENTER"
         if ch in (b"q", b"\x03"): return "QUIT"
         return ch.decode("utf-8", errors="ignore")
@@ -205,7 +269,10 @@ def _prompt(label, default=""):
 
 
 def _pause():
-    input(f"\n  {C.DIM}Press Enter to continue...{C.RST}")
+    try:
+        input(f"\n  {C.DIM}Press Enter to continue...{C.RST}")
+    except (KeyboardInterrupt, EOFError):
+        print()
 
 # ── Core: build ───────────────────────────────────────────────────────────────
 
@@ -220,13 +287,22 @@ def build_image(os_name, version, src, cfg):
     run(["mkdir", "-p", str(original_dir)], sudo=True)
 
     if _exists(dest):
+        clones = _backing_users(dest, cfg["VMS_DIR"])
+        if clones:
+            print()
+            warn(f"{len(clones)} VM disk(s) are linked clones of {dest.name} — "
+                 f"overwriting it will corrupt them:")
+            for c in clones:
+                print(f"    {C.DIM}{c}{C.RST}")
         ans = input(f"\n  {C.YELLOW}⚠{C.RST}  {dest.name} already exists — overwrite? [y/N] ").strip().lower()
         if ans != "y":
             info("Aborted.")
             return
 
+    # customize a temp copy so a failed run never leaves a half-built golden image
+    tmp = dest.with_name(dest.name + ".tmp")
     info(f"Copying  {src_path.name}  →  {dest.name}")
-    run(["cp", "--sparse=always", str(src_path), str(dest)], sudo=True)
+    run(["cp", "--sparse=always", str(src_path), str(tmp)], sudo=True)
 
     info("Running virt-customize...")
 
@@ -240,9 +316,14 @@ def build_image(os_name, version, src, cfg):
         ensure_openssh    = ("rpm -q openssh-server >/dev/null 2>&1 "
                               "|| (dnf install -y openssh-server || yum install -y openssh-server)")
 
+    # password via file: on the command line it would be readable by any local user via ps
+    pw = tempfile.NamedTemporaryFile("w", prefix="labvirt-pw-")
+    pw.write(cfg["ROOT_PASSWORD"])
+    pw.flush()
+
     args = [
-        "virt-customize", "-a", str(dest), "--network",
-        "--root-password", f"password:{cfg['ROOT_PASSWORD']}",
+        "virt-customize", "-a", str(tmp), "--network",
+        "--root-password", f"file:{pw.name}",
         "--run-command", remove_cloud_init,
         "--run-command", ensure_openssh,
         "--run-command",
@@ -264,7 +345,14 @@ def build_image(os_name, version, src, cfg):
             "--install", "bash-completion,vim",
         ]
 
-    run(args, sudo=True)
+    try:
+        run(args, sudo=True)
+    except BaseException:
+        run(["rm", "-f", str(tmp)], sudo=True)
+        raise
+    finally:
+        pw.close()
+    run(["mv", "-f", str(tmp), str(dest)], sudo=True)
     print()
     ok(f"Golden image ready: {dest}")
 
@@ -294,12 +382,13 @@ def _ensure_lab_net(cfg):
                 </dhcp>
               </ip>
             </network>""")
-        xml_path = Path("/tmp/labvirt-lab-net.xml")
-        xml_path.write_text(xml)
-        run(["virsh", "net-define",    str(xml_path)], sudo=True)
+        # random name + 0600: a fixed /tmp path could be pre-created by another local user
+        with tempfile.NamedTemporaryFile("w", prefix="labvirt-net-", suffix=".xml") as f:
+            f.write(xml)
+            f.flush()
+            run(["virsh", "net-define", f.name], sudo=True)
         run(["virsh", "net-start",     cfg["LAB_NET"]], sudo=True)
         run(["virsh", "net-autostart", cfg["LAB_NET"]], sudo=True)
-        xml_path.unlink(missing_ok=True)
         ok(f"Network {cfg['LAB_NET']} created")
     elif not any(l.strip().startswith("Active:") and "yes" in l for l in r.stdout.splitlines()):
         run(["virsh", "net-start", cfg["LAB_NET"]], sudo=True)
@@ -376,10 +465,7 @@ def _offer_ssh(mgmt_ip):
             print(f"  {C.DIM}ssh root@{mgmt_ip}{C.RST}")
             return
         print()
-        subprocess.run(
-            ["ssh", "-o", "StrictHostKeyChecking=no", f"root@{mgmt_ip}"],
-            check=False,
-        )
+        subprocess.run(["ssh", *SSH_OPTS, f"root@{mgmt_ip}"], check=False)
 
 
 def create_vm(os_name, version, vm_name, ram, vcpus, cfg):
@@ -436,12 +522,12 @@ def create_vm(os_name, version, vm_name, ram, vcpus, cfg):
             cmd = (
                 f"subscription-manager register "
                 f"--username {shlex.quote(rhsm_user)} --password {shlex.quote(rhsm_pass)} --auto-attach "
-                f"&& dnf install -y bash-completion vim"
+                f"&& (dnf install -y bash-completion vim || yum install -y bash-completion vim)"
             )
+            # command via stdin, not argv: argv (with the RHSM password) is visible to ps
             subprocess.run(
-                ["ssh", "-o", "StrictHostKeyChecking=no",
-                 "-o", "ConnectTimeout=10", f"root@{mgmt_ip}", cmd],
-                check=False,
+                ["ssh", *SSH_OPTS, "-o", "ConnectTimeout=10", f"root@{mgmt_ip}", "bash -s"],
+                input=cmd, text=True, check=False,
             )
         elif os_name == "rhel":
             print()
@@ -581,144 +667,52 @@ def list_vms(cfg):
         print(f"  {vm_id:<{id_w}}  {col}{name:<{name_w}}{C.RST}  {state:<{state_w}}  {ip_col}{ip:<{ip_w}}{C.RST}  {C.DIM}{disk}{C.RST}")
     print()
 
-# ── Core: images ──────────────────────────────────────────────────────────────
+# ── Core: file listings (images / sources / isos / kickstarts) ────────────────
+
+def _print_file_table(directory, files, empty_msg):
+    if not files:
+        info(empty_msg)
+        print()
+        return
+    rows = [(Path(p).name, _fmt_size(size),
+             datetime.datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M"))
+            for p, size, mtime in files]
+    name_w = max(4, max(len(r[0]) for r in rows))
+    size_w = max(4, max(len(r[1]) for r in rows))
+
+    print(f"  {C.DIM}{directory}{C.RST}")
+    print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
+    print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
+    for name, size_str, mod in rows:
+        print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
+    print()
+
+
+def _list_dir(cfg, key, pattern, empty_msg):
+    directory = cfg.get(key)
+    print()
+    if not directory:
+        info(f"{key} not configured.")
+        print()
+        return
+    if not _exists(directory):
+        info(f"{key} not found: {directory}")
+        print()
+        return
+    _print_file_table(directory, _scan(directory, pattern), empty_msg)
+
 
 def list_images(cfg):
-    original_dir = cfg["ORIGINAL_DIR"]
-    print()
-    if not _exists(original_dir):
-        info(f"ORIGINAL_DIR not found: {original_dir}")
-        print()
-        return
+    _list_dir(cfg, "ORIGINAL_DIR", "*-base.qcow2", "No golden images found.")
 
-    r = subprocess.run(
-        ["sudo", "find", str(original_dir), "-maxdepth", "1", "-name", "*-base.qcow2", "-type", "f"],
-        capture_output=True, text=True,
-    )
-    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
-    if not files:
-        info("No golden images found.")
-        print()
-        return
-
-    rows = []
-    for f in files:
-        sr = subprocess.run(["sudo", "stat", "-c", "%s %Y", f], capture_output=True, text=True)
-        try:
-            size_b, mtime = sr.stdout.strip().split()
-            size     = int(size_b)
-            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
-                       else f"{size / 1_048_576:.0f} MB"
-            mod      = datetime.datetime.fromtimestamp(int(mtime)).strftime("%Y-%m-%d %H:%M")
-        except (ValueError, OSError):
-            size_str, mod = "?", "?"
-        rows.append((Path(f).name, size_str, mod))
-
-    name_w = max(4, max(len(r[0]) for r in rows))
-    size_w = max(4, max(len(r[1]) for r in rows))
-
-    print(f"  {C.DIM}{original_dir}{C.RST}")
-    print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
-    print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
-    for name, size_str, mod in rows:
-        print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
-    print()
-
-# ── Core: isos ────────────────────────────────────────────────────────────────
-
-def list_isos(cfg):
-    iso_dir = cfg.get("KS_ISO_DIR")
-    print()
-    if not iso_dir:
-        info("KS_ISO_DIR not configured.")
-        print()
-        return
-    if not _exists(iso_dir):
-        info(f"KS_ISO_DIR not found: {iso_dir}")
-        print()
-        return
-
-    r = subprocess.run(
-        ["sudo", "find", str(iso_dir), "-maxdepth", "1", "-name", "*.iso", "-type", "f"],
-        capture_output=True, text=True,
-    )
-    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
-    if not files:
-        info("No ISO files found.")
-        print()
-        return
-
-    rows = []
-    for f in files:
-        sr = subprocess.run(["sudo", "stat", "-c", "%s %Y", f], capture_output=True, text=True)
-        try:
-            size_b, mtime = sr.stdout.strip().split()
-            size     = int(size_b)
-            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
-                       else f"{size / 1_048_576:.0f} MB"
-            mod      = datetime.datetime.fromtimestamp(int(mtime)).strftime("%Y-%m-%d %H:%M")
-        except (ValueError, OSError):
-            size_str, mod = "?", "?"
-        rows.append((Path(f).name, size_str, mod))
-
-    name_w = max(4, max(len(r[0]) for r in rows))
-    size_w = max(4, max(len(r[1]) for r in rows))
-
-    print(f"  {C.DIM}{iso_dir}{C.RST}")
-    print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
-    print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
-    for name, size_str, mod in rows:
-        print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
-    print()
-
-# ── Core: sources ────────────────────────────────────────────────────────────
 
 def list_sources(cfg):
-    sources_dir = cfg.get("SOURCES_DIR")
-    print()
-    if not sources_dir:
-        info("SOURCES_DIR not configured.")
-        print()
-        return
-    if not _exists(sources_dir):
-        info(f"SOURCES_DIR not found: {sources_dir}")
-        print()
-        return
+    _list_dir(cfg, "SOURCES_DIR", "*.qcow2", "No source images found.")
 
-    r = subprocess.run(
-        ["sudo", "find", str(sources_dir), "-maxdepth", "1", "-name", "*.qcow2", "-type", "f"],
-        capture_output=True, text=True,
-    )
-    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
-    if not files:
-        info("No source images found.")
-        print()
-        return
 
-    rows = []
-    for f in files:
-        sr = subprocess.run(["sudo", "stat", "-c", "%s %Y", f], capture_output=True, text=True)
-        try:
-            size_b, mtime = sr.stdout.strip().split()
-            size     = int(size_b)
-            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
-                       else f"{size / 1_048_576:.0f} MB"
-            mod      = datetime.datetime.fromtimestamp(int(mtime)).strftime("%Y-%m-%d %H:%M")
-        except (ValueError, OSError):
-            size_str, mod = "?", "?"
-        rows.append((Path(f).name, size_str, mod))
+def list_isos(cfg):
+    _list_dir(cfg, "KS_ISO_DIR", "*.iso", "No ISO files found.")
 
-    name_w = max(4, max(len(r[0]) for r in rows))
-    size_w = max(4, max(len(r[1]) for r in rows))
-
-    print(f"  {C.DIM}{sources_dir}{C.RST}")
-    print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
-    print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
-    for name, size_str, mod in rows:
-        print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
-    print()
-
-# ── Core: kickstarts ──────────────────────────────────────────────────────────
 
 def list_kickstarts(cfg):
     ks_cfg = cfg.get("KS_PATH")
@@ -727,50 +721,16 @@ def list_kickstarts(cfg):
         info("KS_PATH not configured.")
         print()
         return
-
     if ks_cfg.is_file():
-        files = [str(ks_cfg)]
-        ks_dir = ks_cfg.parent
+        st = ks_cfg.stat()
+        _print_file_table(ks_cfg.parent, [(str(ks_cfg), st.st_size, st.st_mtime)],
+                          "No kickstart files found.")
     elif ks_cfg.is_dir():
-        r = subprocess.run(
-            ["find", str(ks_cfg), "-maxdepth", "1", "-name", "*.cfg", "-type", "f"],
-            capture_output=True, text=True,
-        )
-        files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
-        ks_dir = ks_cfg
+        _print_file_table(ks_cfg, _scan(ks_cfg, "*.cfg", sudo=False),
+                          "No kickstart files found.")
     else:
         info(f"KS_PATH not found: {ks_cfg}")
         print()
-        return
-
-    if not files:
-        info("No kickstart files found.")
-        print()
-        return
-
-    rows = []
-    for f in files:
-        sr = subprocess.run(["stat", "-c", "%s %Y", f], capture_output=True, text=True)
-        try:
-            size_b, mtime = sr.stdout.strip().split()
-            size     = int(size_b)
-            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
-                       else f"{size / 1_048_576:.0f} MB" if size >= 1_048_576 \
-                       else f"{max(1, size // 1024)} KB"
-            mod      = datetime.datetime.fromtimestamp(int(mtime)).strftime("%Y-%m-%d %H:%M")
-        except (ValueError, OSError):
-            size_str, mod = "?", "?"
-        rows.append((Path(f).name, size_str, mod))
-
-    name_w = max(4, max(len(r[0]) for r in rows))
-    size_w = max(4, max(len(r[1]) for r in rows))
-
-    print(f"  {C.DIM}{ks_dir}{C.RST}")
-    print(f"  {C.BOLD}{'Name':<{name_w}}  {'Size':<{size_w}}  Modified{C.RST}")
-    print(f"  {'─'*name_w}  {'─'*size_w}  {'─'*16}")
-    for name, size_str, mod in rows:
-        print(f"  {name:<{name_w}}  {size_str:<{size_w}}  {C.DIM}{mod}{C.RST}")
-    print()
 
 # ── Core: about ───────────────────────────────────────────────────────────────
 
@@ -799,56 +759,24 @@ def show_about(cfg):
     print(f"    {CONFIG_FILE}")
     print()
     print(f"  {C.BOLD}Supported OS{C.RST}")
-    print("    RHEL 7.9-10.2 · Rocky 7.9-10.2 · Debian 12/13")
+    print("    RHEL 7.9-10.2 · Rocky 8.10-10.2 · Debian 12/13")
     print()
+
+
+VIEWS = {
+    "list":       list_vms,
+    "images":     list_images,
+    "sources":    list_sources,
+    "isos":       list_isos,
+    "kickstarts": list_kickstarts,
+    "about":      show_about,
+}
 
 # ── Interactive flows ─────────────────────────────────────────────────────────
 
-def _list_sources(sources_dir):
-    r = subprocess.run(
-        ["sudo", "find", str(sources_dir), "-maxdepth", "1", "-name", "*.qcow2", "-type", "f"],
-        capture_output=True, text=True,
-    )
-    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
-    result = []
-    for f in files:
-        sr = subprocess.run(["sudo", "stat", "-c", "%s", f], capture_output=True, text=True)
-        try:
-            size = int(sr.stdout.strip())
-            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
-                       else f"{size / 1_048_576:.0f} MB"
-        except ValueError:
-            size_str = "?"
-        result.append((f"{Path(f).name}  {C.DIM}{size_str}{C.RST}", f))
-    return result
-
-
-def _list_isos(iso_dir):
-    r = subprocess.run(
-        ["sudo", "find", str(iso_dir), "-maxdepth", "1", "-name", "*.iso", "-type", "f"],
-        capture_output=True, text=True,
-    )
-    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
-    result = []
-    for f in files:
-        sr = subprocess.run(["sudo", "stat", "-c", "%s", f], capture_output=True, text=True)
-        try:
-            size = int(sr.stdout.strip())
-            size_str = f"{size / 1_073_741_824:.1f} GB" if size >= 1_073_741_824 \
-                       else f"{size / 1_048_576:.0f} MB"
-        except ValueError:
-            size_str = "?"
-        result.append((f"{Path(f).name}  {C.DIM}{size_str}{C.RST}", f))
-    return result
-
-
-def _list_ks_files(ks_dir):
-    r = subprocess.run(
-        ["find", str(ks_dir), "-maxdepth", "1", "-name", "*.cfg", "-type", "f"],
-        capture_output=True, text=True,
-    )
-    files = sorted(p.strip() for p in r.stdout.splitlines() if p.strip())
-    return [(Path(f).name, f) for f in files]
+def _file_choices(directory, pattern):
+    return [(f"{Path(p).name}  {C.DIM}{_fmt_size(size)}{C.RST}", p)
+            for p, size, _ in _scan(directory, pattern)]
 
 
 def _interactive_build(cfg):
@@ -864,7 +792,7 @@ def _interactive_build(cfg):
     src = None
     sources_dir = cfg.get("SOURCES_DIR")
     if sources_dir and _exists(sources_dir):
-        choices = _list_sources(sources_dir)
+        choices = _file_choices(sources_dir, "*.qcow2")
         if choices:
             choices.append(("[ Enter path manually ]", "__manual__"))
             picked = menu("Select source qcow2", choices,
@@ -882,10 +810,7 @@ def _interactive_build(cfg):
             return
 
     print()
-    try:
-        build_image(os_ch, ver_ch, src, cfg)
-    except SystemExit:
-        pass
+    build_image(os_ch, ver_ch, src, cfg)
 
 
 def _interactive_create(cfg):
@@ -902,14 +827,11 @@ def _interactive_create(cfg):
     ram     = int(_prompt("RAM (MB)", cfg.get("DEFAULT_RAM", "2048")))
     vcpus   = int(_prompt("vCPUs",    cfg.get("DEFAULT_VCPUS", "2")))
     print()
-    try:
-        create_vm(os_ch, ver_ch, vm_name, ram, vcpus, cfg)
-    except SystemExit:
-        pass
+    create_vm(os_ch, ver_ch, vm_name, ram, vcpus, cfg)
 
 
 def _interactive_ks_test(cfg):
-    os_ch = menu("Select OS", [(o, o) for o in SUPPORTED_OS], "Install VM from ISO+ks")
+    os_ch = menu("Select OS", [(o, o) for o in KS_OS], "Install VM from ISO+ks")
     if not os_ch:
         return
     ver_ch = menu("Select version",
@@ -921,7 +843,7 @@ def _interactive_ks_test(cfg):
     iso_path = None
     iso_dir  = cfg.get("KS_ISO_DIR")
     if iso_dir and _exists(iso_dir):
-        choices = _list_isos(iso_dir)
+        choices = _file_choices(iso_dir, "*.iso")
         if choices:
             choices.append(("[ Enter path manually ]", "__manual__"))
             picked = menu("Select ISO", choices, f"KS test — {os_ch} {ver_ch}")
@@ -933,7 +855,7 @@ def _interactive_ks_test(cfg):
     ks_path = None
     ks_cfg  = cfg.get("KS_PATH")
     if ks_cfg and ks_cfg.is_dir():
-        choices = _list_ks_files(ks_cfg)
+        choices = [(Path(p).name, p) for p, _, _ in _scan(ks_cfg, "*.cfg", sudo=False)]
         if choices:
             choices.append(("[ Enter path manually ]", "__manual__"))
             picked = menu("Select kickstart", choices, f"KS test — {os_ch} {ver_ch}")
@@ -961,10 +883,7 @@ def _interactive_ks_test(cfg):
     vcpus   = int(_prompt("vCPUs",    cfg.get("DEFAULT_VCPUS", "2")))
     disk_gb = int(_prompt("Disk (GB)", str(cfg.get("KS_DISK_SIZE", "20"))))
     print()
-    try:
-        ks_test_vm(ks_path, iso_path, os_ch, ver_ch, vm_name, ram, vcpus, disk_gb, cfg)
-    except SystemExit:
-        pass
+    ks_test_vm(ks_path, iso_path, os_ch, ver_ch, vm_name, ram, vcpus, disk_gb, cfg)
 
 
 def _interactive_destroy(cfg):
@@ -987,42 +906,6 @@ def _interactive_destroy(cfg):
         destroy_vm(choice, cfg)
     else:
         info("Aborted.")
-    _pause()
-
-
-def _interactive_list(cfg):
-    sys.stdout.write("\033[2J\033[H")
-    list_vms(cfg)
-    _pause()
-
-
-def _interactive_list_images(cfg):
-    sys.stdout.write("\033[2J\033[H")
-    list_images(cfg)
-    _pause()
-
-
-def _interactive_list_sources(cfg):
-    sys.stdout.write("\033[2J\033[H")
-    list_sources(cfg)
-    _pause()
-
-
-def _interactive_list_isos(cfg):
-    sys.stdout.write("\033[2J\033[H")
-    list_isos(cfg)
-    _pause()
-
-
-def _interactive_list_kickstarts(cfg):
-    sys.stdout.write("\033[2J\033[H")
-    list_kickstarts(cfg)
-    _pause()
-
-
-def _interactive_about(cfg):
-    sys.stdout.write("\033[2J\033[H")
-    show_about(cfg)
     _pause()
 
 
@@ -1078,21 +961,22 @@ def interactive_main(cfg):
                 _pause()
             elif action == "destroy":
                 _interactive_destroy(cfg)
-            elif action == "list":
-                _interactive_list(cfg)
-            elif action == "images":
-                _interactive_list_images(cfg)
-            elif action == "sources":
-                _interactive_list_sources(cfg)
-            elif action == "isos":
-                _interactive_list_isos(cfg)
-            elif action == "kickstarts":
-                _interactive_list_kickstarts(cfg)
-            elif action == "about":
-                _interactive_about(cfg)
-        except KeyboardInterrupt:
+            elif action in VIEWS:
+                sys.stdout.write("\033[2J\033[H")
+                VIEWS[action](cfg)
+                _pause()
+        except (KeyboardInterrupt, EOFError):
             print()
             warn("Cancelled — back to main menu.")
+        except SystemExit:
+            # core functions exit(1) after printing their own error
+            _pause()
+        except subprocess.CalledProcessError as e:
+            _cmd_failed(e)
+            _pause()
+        except ValueError as e:
+            err(f"Invalid input: {e}")
+            _pause()
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -1128,10 +1012,11 @@ def cli_main(cfg):
     sub.add_parser("about",       help="Show program info and quick start")
 
     pk = sub.add_parser("ks-test", help="Install a VM from ISO + kickstart")
-    pk.add_argument("--ks",      default=str(cfg["KS_PATH"]) if cfg.get("KS_PATH") else None,
+    ks_default = cfg.get("KS_PATH")
+    pk.add_argument("--ks",      default=str(ks_default) if ks_default and ks_default.is_file() else None,
                                  help="Path to ks.cfg")
     pk.add_argument("--iso",     required=True, help="Path to installation ISO")
-    pk.add_argument("--os",      required=True, choices=list(SUPPORTED_OS))
+    pk.add_argument("--os",      required=True, choices=KS_OS)
     pk.add_argument("--version", required=True)
     pk.add_argument("--name",    required=True)
     pk.add_argument("--ram",     type=int, default=int(cfg.get("DEFAULT_RAM", 2048)))
@@ -1152,23 +1037,13 @@ def cli_main(cfg):
         create_vm(args.os, args.version, args.name, args.ram, args.vcpus, cfg)
     elif args.cmd == "ks-test":
         if not args.ks:
-            ap.error("--ks is required (or set KS_PATH in config)")
+            ap.error("--ks is required (or set KS_PATH to a .cfg file in config)")
         ks_test_vm(args.ks, args.iso, args.os, args.version,
                    args.name, args.ram, args.vcpus, args.disk_gb, cfg)
     elif args.cmd == "destroy":
         destroy_vm(args.name, cfg)
-    elif args.cmd == "list":
-        list_vms(cfg)
-    elif args.cmd == "images":
-        list_images(cfg)
-    elif args.cmd == "sources":
-        list_sources(cfg)
-    elif args.cmd == "isos":
-        list_isos(cfg)
-    elif args.cmd == "kickstarts":
-        list_kickstarts(cfg)
-    elif args.cmd == "about":
-        show_about(cfg)
+    elif args.cmd in VIEWS:
+        VIEWS[args.cmd](cfg)
     else:
         ap.print_help()
 
@@ -1177,7 +1052,11 @@ def cli_main(cfg):
 def main():
     cfg = load_config()
     if len(sys.argv) > 1:
-        cli_main(cfg)
+        try:
+            cli_main(cfg)
+        except subprocess.CalledProcessError as e:
+            _cmd_failed(e)
+            sys.exit(1)
     elif sys.stdin.isatty() and sys.stdout.isatty():
         interactive_main(cfg)
     else:
